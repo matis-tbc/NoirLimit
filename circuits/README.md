@@ -1,112 +1,90 @@
 # Circuits
 
-Noir zero-knowledge circuits for private card handling in NoirLimit. Built with [Nargo](https://noir-lang.org/).
+Noir zero-knowledge circuits for private card handling in NoirLimit. The repo is still early, so `REVIEWED_PLAN.md` is the protocol source of truth when older README text conflicts with current implementation.
 
-## Directory Structure
+## Current workspace
 
-```
+The circuits directory now contains a minimal Noir workspace:
+
+```text
 circuits/
-├── shuffle/            # Deck shuffle proof circuits
-│   ├── src/
-│   │   └── main.nr    # Proves a shuffle is a valid permutation of the deck
-│   └── Nargo.toml
-│
-├── deal/               # Card dealing proof circuits
-│   ├── src/
-│   │   └── main.nr    # Proves a dealt card belongs to the shuffled deck without revealing it
-│   └── Nargo.toml
-│
-├── bet/                # Betting validity circuits
-│   ├── src/
-│   │   └── main.nr    # Proves a bet action is valid given hidden hand state
-│   └── Nargo.toml
-│
-├── reveal/             # Card reveal / showdown circuits
-│   ├── src/
-│   │   └── main.nr    # Proves revealed cards match prior commitments
-│   └── Nargo.toml
-│
-└── common/             # Shared circuit utilities
-    ├── src/
-    │   └── lib.nr      # Card structs, commitment helpers, shared types
-    └── Nargo.toml
+├── Nargo.toml          # Workspace for active Noir packages
+├── common/             # Shared shuffle types and helpers
+│   ├── Nargo.toml
+│   └── src/lib.nr
+├── shuffle/            # Week 4 encrypt-shuffle prototype
+│   ├── Nargo.toml
+│   ├── Prover.toml
+│   └── src/main.nr
+├── decrypt/            # Week 4 partial decryption prototype
+│   ├── Nargo.toml
+│   └── src/main.nr
+├── deal/               # Planned
+├── bet/                # Planned / likely removed per reviewed plan
+└── reveal/             # Planned
 ```
 
-## Circuit Descriptions
+`common/`, `shuffle/`, and `decrypt/` are the active Noir packages today. The other directories remain planning scaffolds.
 
-### Shuffle Circuit (`shuffle/`)
+## Week 4 shuffle implementation
 
-**Purpose**: Proves that a player's shuffle is a valid permutation of the input deck.
+`shuffle/` now implements the first real vertical slice of the reviewed shuffle protocol:
 
-**Public inputs**: Previous deck commitment, new deck commitment
-**Private inputs**: Permutation array, randomness
+- Public inputs: `previous_deck_commitment`, `new_deck_commitment`
+- Private inputs: `previous_deck`, `new_deck`, `permutation`, `rerandomization`
+- Constraints:
+  - the previous and new deck commitments match the supplied decks
+  - `permutation` is a valid permutation over the active deck size
+  - each output card is a valid rerandomization of the selected input card
 
-The shuffle protocol is multi-party -- each player shuffles and proves validity. The final shuffled deck is a composition of all individual shuffles, so no single player controls card ordering.
+This is intentionally a **staged prototype**:
 
-### Deal Circuit (`deal/`)
+- The deck size is currently a small compile-time constant for witness and test practicality.
+- The shared library also defines `FULL_DECK_SIZE = 52` and includes a scale-readiness fixture path so the API can grow to a full deck without redesign.
+- The ciphertext and hashing model are a **SNARK-friendly placeholder**, not final production cryptography.
 
-**Purpose**: Proves that a dealt card is a valid card from the shuffled deck at a specific position, without revealing which card it is.
+## Shared library
 
-**Public inputs**: Deck commitment, card position index, card commitment (hash of card value)
-**Private inputs**: Card value, opening randomness
+`common/` owns the reusable shuffle primitives:
 
-This lets the contract verify a card was dealt correctly while the card value stays private to the recipient.
+- `Card = u8` card encoding
+- `EncryptedCard` fixed-width ciphertext struct
+- configurable deck constants
+- deck commitment hashing
+- permutation validation
+- ordered deck fixture generation
+- toy rerandomization helpers
+- toy player key derivation and partial-decryption helpers
 
-### Bet Circuit (`bet/`)
+The current hash and ciphertext construction are poseidon-style placeholders designed to validate circuit structure first. They should be replaced later with the final mental-poker primitive once the team chooses the production encryption scheme.
 
-**Purpose**: Proves that a player's action (fold/check/call/raise) is valid given their private hand, without revealing the hand.
+## Week 4 decrypt implementation
 
-**Public inputs**: Game state hash, action type, bet amount
-**Private inputs**: Player's hand cards
+`decrypt/` implements the new partial-decryption proof called for in `REVIEWED_PLAN.md`:
 
-This is mainly used to enforce rules -- e.g., a player can't claim "all-in" if their stack doesn't match, or make an invalid raise.
+- Public inputs:
+  - `encrypted_card_commitment`
+  - `encrypted_card_randomizer`
+  - `encrypted_card_masked_payload`
+  - `partial_decryption`
+  - `player_public_key`
+- Private input:
+  - `player_secret_key`
+- Constraints:
+  - the public key must match the private secret key
+  - the partial decryption share must be the expected share for that encrypted card and secret key
 
-### Reveal Circuit (`reveal/`)
+Like shuffle, this is still a **placeholder cryptographic model**. The proof shape now matches the protocol flow, but the key/share arithmetic is intentionally toy until the production threshold-encryption primitive is selected.
 
-**Purpose**: At showdown, proves that the cards a player reveals match their original dealt card commitments.
+## Build and test
 
-**Public inputs**: Original card commitments (from dealing phase), revealed card values
-**Private inputs**: Commitment randomness (opening)
-
-This prevents players from lying about their hand at showdown.
-
-### Common (`common/`)
-
-Shared types and helpers used across circuits:
-- Card struct (suit + rank)
-- Pedersen commitment helpers
-- Deck representation (52-element array)
-- Hash utilities
-
-## How Circuits Connect to Contracts
-
-1. Player generates a proof locally using `nargo prove`
-2. Proof is submitted to the poker contract on-chain
-3. Contract calls the corresponding verifier contract (auto-generated from `nargo codegen-verifier`)
-4. Verifier returns true/false; game state advances if valid
-
-## Build & Test
+Once the Noir toolchain is installed:
 
 ```bash
-# Compile all circuits
-for dir in shuffle deal bet reveal common; do
-  cd $dir && nargo compile && cd ..
-done
-
-# Run circuit tests
-for dir in shuffle deal bet reveal common; do
-  cd $dir && nargo test && cd ..
-done
-
-# Generate Solidity verifiers
-for dir in shuffle deal bet reveal; do
-  cd $dir && nargo codegen-verifier && cd ..
-done
+cd circuits
+nargo check --workspace
+nargo test --package shuffle
+nargo test --package decrypt
 ```
 
-## Design Considerations
-
-- **Commitment scheme**: Using Pedersen commitments (native to Noir) for card hiding
-- **Multi-party shuffle**: Prevents any single player from stacking the deck
-- **Proof size**: Each proof is ~1-2KB on-chain; verifying costs ~200-300k gas on L1
-- **If gas is too high**: We may deploy on the Aztec network where Noir proofs verify natively with much lower overhead
+Because the repo is still scaffold-heavy, verifier generation and broader integration work should still be scoped to the active packages.

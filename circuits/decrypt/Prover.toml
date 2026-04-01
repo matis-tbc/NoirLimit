@@ -1,0 +1,6 @@
+encrypted_card_commitment = ""
+encrypted_card_masked_payload = ""
+encrypted_card_randomizer = ""
+partial_decryption = ""
+player_public_key = ""
+player_secret_key = ""

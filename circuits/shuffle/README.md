@@ -1,26 +1,58 @@
 # Shuffle Circuit
 
-Proves that a player's shuffle is a valid permutation of the deck.
+Week 4 implements the shuffle circuit as a staged **encrypt-shuffle prototype** aligned with `REVIEWED_PLAN.md`, not the older permutation-only design.
 
 ## What This Proves
 
-Given a committed deck state, this circuit proves:
-1. The output deck is a valid permutation of the input deck (no cards added/removed/duplicated)
-2. The player contributed randomness to the permutation
-3. The new deck commitment matches the shuffled result
+Given a committed encrypted deck state, this circuit proves:
+
+1. `previous_deck` matches `previous_deck_commitment`
+2. `new_deck` matches `new_deck_commitment`
+3. `permutation` is a valid permutation over the active deck size
+4. every `new_deck[i]` is a valid rerandomization of `previous_deck[permutation[i]]`
+
+That gives us the right protocol shape for a mental-poker shuffle proof without forcing the final cryptographic primitive too early.
 
 ## Inputs
 
-- **Public**: Previous deck commitment, new deck commitment
-- **Private**: Permutation array (52 indices), randomness value
+- **Public**: `previous_deck_commitment`, `new_deck_commitment`
+- **Private**:
+  - `previous_deck: [EncryptedCard; N]`
+  - `new_deck: [EncryptedCard; N]`
+  - `permutation: [u8; N]`
+  - `rerandomization: [Field; N]`
 
-## Multi-Party Protocol
+## Current model
 
-Each player shuffles in sequence. Player 1 shuffles the initial ordered deck, Player 2 shuffles Player 1's output, etc. Since each player's permutation is private, no single player knows the final card ordering.
+The current `EncryptedCard` is a fixed-width placeholder ciphertext that contains:
+
+- a hidden card commitment
+- a rerandomizable masking field
+- a stored randomizer used to derive that mask
+
+This is a **SNARK-friendly placeholder model** for Week 4. It is useful for building and testing the shuffle proof shape, but it is not the final ROYALE/ElGamal-style mental-poker encryption scheme.
+
+## Deck sizing
+
+- The live circuit uses a small compile-time `DECK_SIZE` for practical test witnesses.
+- The shared library also defines `FULL_DECK_SIZE = 52`.
+- Helper APIs are generic over deck length so moving to 52 cards should be a constant/config upgrade rather than a redesign.
+
+## Tests
+
+`src/main.nr` includes circuit tests for:
+
+- valid identity permutation with rerandomization
+- valid nontrivial permutation
+- duplicate permutation entries
+- out-of-range permutation entries
+- tampered rerandomization on one card
+- invalid previous commitment
+- invalid new commitment
+- scale-readiness fixture generation for the future 52-card move
 
 ## Files
 
-- `src/main.nr` - Main circuit logic
-- `Nargo.toml` - Circuit config (name, dependencies)
-- `Prover.toml` - Example prover inputs for testing
-- `Verifier.toml` - Example verifier inputs
+- `src/main.nr` - Main shuffle circuit plus circuit tests
+- `Nargo.toml` - Package config
+- `Prover.toml` - Placeholder prover input template to fill with concrete fixtures once `nargo` is available

@@ -1,0 +1,7 @@
+[package]
+name = "shuffle"
+type = "bin"
+authors = ["NoirLimit"]
+
+[dependencies]
+common = { path = "../common" }

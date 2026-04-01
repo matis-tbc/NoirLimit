@@ -1,0 +1,7 @@
+[package]
+name = "reveal"
+type = "bin"
+authors = ["NoirLimit"]
+
+[dependencies]
+common = { path = "../common" }

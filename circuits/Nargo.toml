@@ -1,0 +1,3 @@
+[workspace]
+members = ["common", "shuffle", "decrypt", "reveal"]
+default-member = "shuffle"

@@ -1,17 +1,17 @@
 # Reveal Circuit
 
-Proves that revealed cards at showdown match the original dealt commitments.
+Proves that a player's two revealed hole cards at showdown match the original deal-phase commitments.
 
 ## What This Proves
 
-1. The card values being revealed match the commitments made during the deal phase
-2. The player is revealing their actual cards, not substituting different ones
-3. The commitment opening (randomness) is valid
+1. The two revealed hole-card values match the commitments made during the deal phase
+2. The player is revealing their actual showdown hand, not substituting different cards
+3. The commitment openings (randomness values) are valid for both cards
 
 ## Inputs
 
-- **Public**: Original card commitments (from dealing), revealed card values
-- **Private**: Commitment randomness (opening values)
+- **Public**: `card_commitments: [Field; 2]`, `revealed_cards: [Card; 2]`
+- **Private**: `commitment_randomness: [Field; 2]`
 
 ## Showdown Flow
 
@@ -24,3 +24,4 @@ Proves that revealed cards at showdown match the original dealt commitments.
 
 - `src/main.nr` - Main circuit logic
 - `Nargo.toml` - Circuit config
+- `Prover.toml` - Example prover input template

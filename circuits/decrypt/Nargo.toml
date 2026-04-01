@@ -1,0 +1,7 @@
+[package]
+name = "decrypt"
+type = "bin"
+authors = ["NoirLimit"]
+
+[dependencies]
+common = { path = "../common" }
