@@ -8,6 +8,7 @@ contracts/out/
 contracts/cache/
 
 # Noir artifacts
+circuits/target/
 circuits/*/target/
 circuits/*/proofs/
 circuits/*/contract/
@@ -29,3 +30,6 @@ Thumbs.db
 
 # Foundry
 broadcast/
+
+# Generated verifier contracts (regenerate with bb)
+contracts/verifiers-generated/

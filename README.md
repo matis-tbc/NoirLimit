@@ -1,6 +1,6 @@
 # NoirLimit
 
-Zero-Knowledge Poker and Spectator Wagering Protocol built with Noir.
+Zero-knowledge poker on EVM. Heads-up No-Limit Texas Hold'em with private cards secured by Noir ZK proofs.
 
 ## Team
 
@@ -8,124 +8,93 @@ Zero-Knowledge Poker and Spectator Wagering Protocol built with Noir.
 - **Brady** ([@Braeden464](https://github.com/Braeden464))
 - **Xavier Rudnick** ([@XavierRudnick](https://github.com/XavierRudnick))
 
-## Overview
+## Status
 
-NoirLimit is a trustless on-chain poker application that uses Noir zero-knowledge proofs to keep player hands private while revealing community cards publicly. It includes a spectator betting market where viewers can wager on game outcomes.
+MVP in progress. Core contracts and circuits are built and tested. Frontend not started.
 
-### The Problem
+**What works:**
+- PokerTable.sol: complete state machine (14 states), betting, timeouts, payouts, hand evaluation
+- 3 Noir circuits (shuffle, decrypt, reveal) using Pedersen hash at 52-card scale
+- Generated Solidity verifier contracts from compiled circuits
+- 55 contract tests, 17 circuit tests (all passing)
 
-Blockchain data is 100% transparent. For poker to work on-chain, individual player cards must remain hidden while the game state (community cards, pot size, actions) stays public and verifiable. Noir's zero-knowledge circuits solve this by proving card validity without revealing card values.
-
-### How It Works
-
-1. **Deck Shuffling** - A commitment-based shuffle protocol where each player contributes randomness, proven valid via ZK circuits
-2. **Private Dealing** - Cards are dealt as encrypted commitments; only the recipient can decrypt their hand
-3. **Betting Rounds** - Standard No-Limit Texas Hold'em betting (pre-flop, flop, turn, river) managed by the poker smart contract
-4. **Card Reveals** - Community cards are revealed publicly; player hands are only revealed at showdown via ZK proofs
-5. **Payouts** - Winner determined by on-chain proof verification; pot distributed automatically
-6. **Spectator Wagering** - A secondary contract lets spectators bet on outcomes using only public game state
+**What's next:**
+- Integration test with real proofs end-to-end
+- Frontend (wallet connect, table UI, in-browser proof generation)
+- Testnet deployment
 
 ## Project Structure
 
 ```
 NoirLimit/
-├── contracts/          # Solidity smart contracts
-│   ├── poker/          # Core poker game logic
-│   ├── spectator/      # Spectator wagering market
-│   ├── verifiers/      # Auto-generated proof verifier contracts
-│   ├── interfaces/     # Contract interfaces
-│   └── libraries/      # Shared Solidity libraries
-├── circuits/           # Noir zero-knowledge circuits
-│   ├── shuffle/        # Deck shuffle proof circuits
-│   ├── deal/           # Card dealing proof circuits
-│   ├── bet/            # Betting validity circuits
-│   ├── reveal/         # Card reveal/showdown circuits
-│   └── common/         # Shared circuit utilities
-├── frontend/           # React web application
-│   └── src/
-│       ├── components/ # UI components
-│       ├── hooks/      # Custom React hooks
-│       ├── utils/      # Helper functions
-│       ├── pages/      # Page-level components
-│       ├── assets/     # Static assets
-│       └── abi/        # Contract ABIs
-├── scripts/            # Deployment and utility scripts
-├── tests/              # Test suites
-│   ├── contracts/      # Smart contract tests
-│   ├── circuits/       # Circuit tests
-│   └── integration/    # End-to-end integration tests
-└── docs/               # Technical documentation
+├── circuits/                # Noir ZK circuits
+│   ├── common/              # Shared crypto primitives (Pedersen hash, card encryption)
+│   ├── shuffle/             # Encrypt-shuffle proof (re-encryption permutation)
+│   ├── decrypt/             # Threshold decryption proof (partial key share)
+│   └── reveal/              # Showdown card reveal proof (commitment opening)
+├── contracts/               # Solidity (Foundry)
+│   ├── src/
+│   │   ├── PokerTable.sol   # Game state machine + betting + settlement
+│   │   ├── HandEvaluator.sol # Poker hand ranking (best 5 of 7)
+│   │   ├── interfaces/      # IVerifier interface
+│   │   └── mocks/           # MockVerifier, RejectingVerifier for tests
+│   ├── test/                # Foundry test suite (55 tests)
+│   └── verifiers-generated/ # Solidity verifiers generated from circuits via bb
+├── frontend/                # React app (not yet implemented)
+└── REVIEWED_PLAN.md         # Protocol design document
 ```
 
 ## Tech Stack
 
-- **ZK Proofs**: [Noir](https://noir-lang.org/) (by Aztec)
-- **Smart Contracts**: Solidity (EVM-compatible)
-- **Frontend**: React + ethers.js/viem
-- **Testnet**: Ethereum EVM testnet (Sepolia)
-- **Potential L2**: Aztec Network (if L1 gas costs are prohibitive)
+- **ZK Proofs**: Noir (Pedersen hash, compiled with nargo 0.39.0)
+- **Smart Contracts**: Solidity 0.8.24, Foundry
+- **Proof Backend**: Barretenberg (bb 0.63.1 for verifier generation)
+- **Frontend** (planned): React, Vite, wagmi, viem, @noir-lang/noir_js
 
 ## Getting Started
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) >= 18
-- [Nargo](https://noir-lang.org/docs/getting_started/installation/) (Noir toolchain)
-- [Foundry](https://book.getfoundry.sh/) (Solidity development)
-- A wallet with testnet ETH
+- [Nargo](https://noir-lang.org/docs/getting_started/installation/) (install via `noirup`)
+- [Foundry](https://book.getfoundry.sh/) (install via `foundryup`)
 
-### Installation
+### Build and Test
 
 ```bash
-# Clone the repo
-git clone https://github.com/matis-tbc/NoirLimit.git
-cd NoirLimit
-
-# Install frontend dependencies
-cd frontend && npm install
-
-# Compile Noir circuits
-cd ../circuits && nargo compile
-
-# Compile Solidity contracts
-cd ../contracts && forge build
-```
-
-### Running Tests
-
-```bash
-# Circuit tests
+# Compile and test circuits
 cd circuits && nargo test
 
-# Contract tests
+# Compile and test contracts
 cd contracts && forge test
-
-# Integration tests
-cd tests/integration && npm test
 ```
 
-## Timeline
+### Circuit Benchmarks (52-card deck, Pedersen hash)
 
-| Week | Dates | Focus |
-|------|-------|-------|
-| 1 | Mar 11 - Mar 17 | Research & System Design |
-| 2 | Mar 18 - Mar 24 | Core Poker Logic |
-| 3 | Mar 25 - Mar 31 | Zero-Knowledge Integration |
-| 4 | Apr 1 - Apr 7 | Betting System & Spectator Market |
-| 5 | Apr 8 - Apr 14 | Frontend & Integration |
-| 6 | Apr 15 - Apr 20 | Testing & Final Deployment |
+| Circuit | ACIR Opcodes | Gates | Description |
+|---------|-------------|-------|-------------|
+| shuffle | 22,977 | 103,756 | Re-encryption shuffle proof |
+| decrypt | 224 | 3,351 | Partial decryption proof |
+| reveal | 130 | 3,099 | Card commitment opening |
 
-## Definition of Success
+## How It Works
 
-Launch an MVP on an EVM testnet that can:
-1. Complete a full hand of poker (shuffle, deal, bet, payout) with private card data secured on-chain
-2. Process at least one spectator wager through the secondary smart contract
+1. **Table creation**: Player 1 creates a table with a buy-in. Player 2 joins and matches.
+2. **Key registration**: Both players register public keys for threshold decryption.
+3. **Shuffle**: Each player re-encrypts and permutes the deck, submitting a ZK proof that the shuffle is valid.
+4. **Deal**: Both players submit partial decryption shares for hole cards, proven correct via ZK.
+5. **Betting**: Standard poker betting rounds (pre-flop, flop, turn, river). All on-chain.
+6. **Community reveals**: Both players submit matching decrypted community card values.
+7. **Showdown**: Players reveal hole cards with ZK proofs binding to their dealt commitments.
+8. **Settlement**: HandEvaluator determines the winner. Contract distributes the pot.
 
-## Known Risks & Blind Spots
+Timeouts at every phase. If a player stalls, the opponent can claim the pot after 120 seconds.
 
-- **Client-side proof generation performance** on low-spec hardware is unknown
-- **Gas overhead** for verifying multiple complex proofs may exceed L1 practical limits (may require Aztec L2)
-- **Player disconnection** means their cards can't be decrypted, forcing a fold
+## Known Limitations
+
+- 2-player heads-up only (multi-player requires N-party threshold decryption)
+- Decrypt proof public inputs are partially placeholder (protocol design needed for per-card encrypted state tracking)
+- No frontend yet
+- Gas costs untested on L2 (verifier contracts are large)
 
 ## License
 
