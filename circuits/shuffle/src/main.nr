@@ -1,6 +1,6 @@
 use common::{
     assert_is_valid_rerandomization,
-    assert_scale_ready_fixture_pattern,
+    assert_full_deck_fixture_valid,
     assert_valid_permutation,
     deck_commitment,
     empty_encrypted_card,
@@ -37,15 +37,28 @@ fn sample_previous_deck() -> [EncryptedCard; DECK_SIZE] {
 }
 
 fn identity_permutation() -> [u8; DECK_SIZE] {
-    [0, 1, 2, 3, 4, 5, 6, 7]
+    let mut perm = [0 as u8; DECK_SIZE];
+    for i in 0..DECK_SIZE {
+        perm[i] = i as u8;
+    }
+    perm
 }
 
 fn nontrivial_permutation() -> [u8; DECK_SIZE] {
-    [2, 5, 1, 7, 0, 6, 4, 3]
+    // Reverse the deck
+    let mut perm = [0 as u8; DECK_SIZE];
+    for i in 0..DECK_SIZE {
+        perm[i] = (DECK_SIZE - 1 - i) as u8;
+    }
+    perm
 }
 
 fn sample_rerandomization() -> [Field; DECK_SIZE] {
-    [11, 13, 17, 19, 23, 29, 31, 37]
+    let mut rerand = [0 as Field; DECK_SIZE];
+    for i in 0..DECK_SIZE {
+        rerand[i] = (11 + i * 7) as Field;
+    }
+    rerand
 }
 
 fn build_shuffle_case(
@@ -101,7 +114,8 @@ fn test_valid_nontrivial_shuffle() {
 
 #[test(should_fail_with = "permutation contains duplicate index")]
 fn test_invalid_permutation_duplicate_index() {
-    let permutation = [0, 1, 1, 3, 4, 5, 6, 7];
+    let mut permutation = identity_permutation();
+    permutation[1] = 0; // duplicate: both index 0 and 1 point to 0
     let rerandomization = sample_rerandomization();
     let (previous_deck, new_deck, previous_commitment, new_commitment) =
         build_shuffle_case(identity_permutation(), rerandomization);
@@ -118,7 +132,8 @@ fn test_invalid_permutation_duplicate_index() {
 
 #[test(should_fail_with = "permutation index out of range")]
 fn test_invalid_permutation_out_of_range() {
-    let permutation = [0, 1, 2, 3, 4, 5, 6, 8];
+    let mut permutation = identity_permutation();
+    permutation[DECK_SIZE - 1] = DECK_SIZE as u8; // out of range
     let rerandomization = sample_rerandomization();
     let (previous_deck, new_deck, previous_commitment, new_commitment) =
         build_shuffle_case(identity_permutation(), rerandomization);
@@ -196,5 +211,5 @@ fn test_invalid_new_deck_commitment() {
 fn test_scale_sanity_fixture_generator() {
     let placeholder = empty_encrypted_card();
     assert(placeholder.card_commitment == 0, "empty ciphertext baseline should stay stable");
-    assert_scale_ready_fixture_pattern();
+    assert_full_deck_fixture_valid();
 }
