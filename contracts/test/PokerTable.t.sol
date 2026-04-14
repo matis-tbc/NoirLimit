@@ -1067,8 +1067,76 @@ contract PokerTableTest is Test {
     }
 
     function test_demoMode_skipsProofs() public {
-        MockVerifier mock = new MockVerifier();
-        PokerTable demoPoker = new PokerTable(address(mock), address(mock), address(mock), true);
+        // Deploy with RejectingVerifier + demoMode=true: proofs should be skipped
+        RejectingVerifier rejector = new RejectingVerifier();
+        PokerTable demoPoker = new PokerTable(address(rejector), address(rejector), address(rejector), true);
         assertTrue(demoPoker.demoMode());
+
+        vm.deal(p1, 10 ether);
+        vm.deal(p2, 10 ether);
+
+        vm.prank(p1);
+        uint256 tid = demoPoker.createTable{value: BUY_IN}(BIG_BLIND);
+        vm.prank(p2);
+        demoPoker.joinTable{value: BUY_IN}(tid);
+
+        // Shuffle (would fail without demoMode since rejector rejects all proofs)
+        vm.prank(p1);
+        demoPoker.registerPublicKey(tid, bytes32(uint256(0xaa)));
+        vm.prank(p2);
+        demoPoker.registerPublicKey(tid, bytes32(uint256(0xbb)));
+
+        vm.prank(p1);
+        demoPoker.submitShuffle(tid, "", bytes32(uint256(1)), _emptyDeck(), _emptyDeck(), _emptyDeck());
+        (bytes32[52] memory c, bytes32[52] memory r, bytes32[52] memory p) = _sampleDeck();
+        vm.prank(p2);
+        demoPoker.submitShuffle(tid, "", bytes32(uint256(2)), c, r, p);
+
+        // Deal (also skips decrypt proof)
+        uint8[] memory p1Idx = new uint8[](2);
+        p1Idx[0] = 2; p1Idx[1] = 3;
+        bytes32[] memory shares = new bytes32[](2);
+        shares[0] = bytes32(uint256(1)); shares[1] = bytes32(uint256(2));
+        bytes[] memory proofs = new bytes[](2);
+        proofs[0] = ""; proofs[1] = "";
+        uint8[] memory noCards = new uint8[](0);
+
+        vm.prank(p1);
+        demoPoker.submitDecrypt(tid, p1Idx, shares, proofs, noCards);
+
+        uint8[] memory p2Idx = new uint8[](2);
+        p2Idx[0] = 0; p2Idx[1] = 1;
+        vm.prank(p2);
+        demoPoker.submitDecrypt(tid, p2Idx, shares, proofs, noCards);
+
+        // Fold to settle (proves full flow works in demoMode)
+        vm.prank(p1);
+        demoPoker.act(tid, IPokerTable.Action.FOLD, 0);
+
+        (, , , IPokerTable.State s, , ) = demoPoker.getTable(tid);
+        assertEq(uint8(s), uint8(IPokerTable.State.SETTLED));
+    }
+
+    // ============================
+    //  Restored: call nothing to call
+    // ============================
+
+    function test_call_nothing_to_call_reverts() public {
+        uint256 tid = _createAndJoin();
+        _toPreflop(tid);
+
+        vm.prank(p1);
+        poker.act(tid, IPokerTable.Action.CALL, 0);
+        vm.prank(p2);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
+
+        uint8[] memory flop = new uint8[](3);
+        flop[0] = 10; flop[1] = 21; flop[2] = 31;
+        _doReveal(tid, flop);
+
+        // Post-flop: P2 acts first. Try to call when nothing is owed.
+        vm.prank(p2);
+        vm.expectRevert("nothing to call");
+        poker.act(tid, IPokerTable.Action.CALL, 0);
     }
 }

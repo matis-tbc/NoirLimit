@@ -61,7 +61,7 @@ contract PokerTable is IPokerTable {
 
     uint256 public nextTableId;
     uint256 public actionTimeout = 120;
-    bool public demoMode;
+    bool public immutable demoMode;
 
     IVerifier public shuffleVerifier;
     IVerifier public decryptVerifier;
@@ -340,6 +340,10 @@ contract PokerTable is IPokerTable {
                 require(t.pendingCardValues.length == expectedCount, "wrong card count");
                 for (uint8 i = 0; i < expectedCount; i++) {
                     require(t.pendingCardValues[i] < 52, "invalid card");
+                    // Check no duplicate with existing community cards
+                    for (uint8 j = 0; j < t.communityCardCount; j++) {
+                        require(t.pendingCardValues[i] != t.communityCards[j], "duplicate community card");
+                    }
                     t.communityCards[t.communityCardCount++] = t.pendingCardValues[i];
                 }
                 delete t.pendingCardValues;

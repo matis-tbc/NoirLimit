@@ -3,11 +3,12 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Script.sol";
 import "../src/PokerTable.sol";
+import "../src/mocks/MockVerifier.sol";
 
 contract Deploy is Script {
     function run() external {
         uint256 deployerKey = vm.envUint("PRIVATE_KEY");
-        bool demo = vm.envOr("DEMO_MODE", true);
+        bool demo = vm.envOr("DEMO_MODE", false);
 
         vm.startBroadcast(deployerKey);
 
@@ -42,5 +43,3 @@ contract Deploy is Script {
         vm.stopBroadcast();
     }
 }
-
-import "../src/mocks/MockVerifier.sol";
