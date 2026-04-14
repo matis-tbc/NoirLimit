@@ -16,7 +16,7 @@ MVP in progress. Core contracts and circuits are built and tested. Frontend not 
 - PokerTable.sol: complete state machine (14 states), betting, timeouts, payouts, hand evaluation
 - 3 Noir circuits (shuffle, decrypt, reveal) using Pedersen hash at 52-card scale
 - Generated Solidity verifier contracts from compiled circuits
-- 55 contract tests, 17 circuit tests (all passing)
+- 60 contract tests, 17 circuit tests (all passing)
 
 **What's next:**
 - Integration test with real proofs end-to-end
@@ -36,9 +36,9 @@ NoirLimit/
 │   ├── src/
 │   │   ├── PokerTable.sol   # Game state machine + betting + settlement
 │   │   ├── HandEvaluator.sol # Poker hand ranking (best 5 of 7)
-│   │   ├── interfaces/      # IVerifier interface
+│   │   ├── interfaces/      # IPokerTable, ISpectatorMarket, IVerifier
 │   │   └── mocks/           # MockVerifier, RejectingVerifier for tests
-│   ├── test/                # Foundry test suite (55 tests)
+│   ├── test/                # Foundry test suite (60 tests)
 │   └── verifiers-generated/ # Solidity verifiers generated from circuits via bb
 ├── frontend/                # React app (not yet implemented)
 └── REVIEWED_PLAN.md         # Protocol design document

@@ -957,9 +957,8 @@ contract PokerTableTest is Test {
     // ============================
 
     function test_registerPublicKey_overwrite_reverts() public {
-        uint256 tid = _createAndJoin();
-        // First registration works (already done in _doShuffles, but let's test standalone)
-        // Create a fresh table to test directly
+        _createAndJoin();
+        // Create a fresh table to test registration directly
         vm.prank(p1);
         uint256 tid2 = poker.createTable{value: BUY_IN}(BIG_BLIND);
         vm.prank(p2);
