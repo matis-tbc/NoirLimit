@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Test.sol";
 import "../src/PokerTable.sol";
+import "../src/interfaces/IPokerTable.sol";
 import "../src/mocks/MockVerifier.sol";
 import "../src/mocks/RejectingVerifier.sol";
 
@@ -76,8 +77,8 @@ contract PokerTableTest is Test {
         _doDeal(tid);
     }
 
-    function _checkState(uint256 tid, PokerTable.State expected) internal view {
-        (, , , PokerTable.State s, , ) = poker.getTable(tid);
+    function _checkState(uint256 tid, IPokerTable.State expected) internal view {
+        (, , , IPokerTable.State s, , ) = poker.getTable(tid);
         assertEq(uint8(s), uint8(expected));
     }
 
@@ -88,7 +89,7 @@ contract PokerTableTest is Test {
     function test_createTable() public {
         vm.prank(p1);
         uint256 tid = poker.createTable{value: BUY_IN}(BIG_BLIND);
-        _checkState(tid, PokerTable.State.WAITING);
+        _checkState(tid, IPokerTable.State.WAITING);
     }
 
     function test_createTable_zeroValue_reverts() public {
@@ -108,7 +109,7 @@ contract PokerTableTest is Test {
         uint256 tid = poker.createTable{value: BUY_IN}(BIG_BLIND);
         vm.prank(p2);
         poker.joinTable{value: BUY_IN}(tid);
-        _checkState(tid, PokerTable.State.SHUFFLE_P1);
+        _checkState(tid, IPokerTable.State.SHUFFLE_P1);
     }
 
     function test_joinTable_wrongBuyIn_reverts() public {
@@ -133,7 +134,7 @@ contract PokerTableTest is Test {
         uint256 balBefore = p1.balance;
         vm.prank(p1);
         poker.cancelTable(tid);
-        _checkState(tid, PokerTable.State.CANCELLED);
+        _checkState(tid, IPokerTable.State.CANCELLED);
         assertEq(p1.balance, balBefore + BUY_IN);
     }
 
@@ -152,7 +153,7 @@ contract PokerTableTest is Test {
         uint256 tid = _createAndJoin();
         vm.prank(p1);
         poker.submitShuffle(tid, "", bytes32(uint256(1)));
-        _checkState(tid, PokerTable.State.SHUFFLE_P2);
+        _checkState(tid, IPokerTable.State.SHUFFLE_P2);
     }
 
     function test_shuffle_wrongPlayer_reverts() public {
@@ -165,7 +166,7 @@ contract PokerTableTest is Test {
     function test_shuffle_p2_advances_to_dealing() public {
         uint256 tid = _createAndJoin();
         _doShuffles(tid);
-        _checkState(tid, PokerTable.State.DEALING);
+        _checkState(tid, IPokerTable.State.DEALING);
     }
 
     // ============================
@@ -175,14 +176,14 @@ contract PokerTableTest is Test {
     function test_preflop_fold() public {
         uint256 tid = _createAndJoin();
         _toPreflop(tid);
-        _checkState(tid, PokerTable.State.PREFLOP);
+        _checkState(tid, IPokerTable.State.PREFLOP);
 
         // Dealer (p1) folds
         uint256 p2BalBefore = p2.balance;
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.FOLD, 0);
+        poker.act(tid, IPokerTable.Action.FOLD, 0);
 
-        _checkState(tid, PokerTable.State.SETTLED);
+        _checkState(tid, IPokerTable.State.SETTLED);
         // P2 gets pot + their remaining stack
         assertGt(p2.balance, p2BalBefore);
     }
@@ -193,13 +194,13 @@ contract PokerTableTest is Test {
 
         // Dealer calls (matches BB)
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CALL, 0);
+        poker.act(tid, IPokerTable.Action.CALL, 0);
 
         // BB checks
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
-        _checkState(tid, PokerTable.State.FLOP_REVEAL);
+        _checkState(tid, IPokerTable.State.FLOP_REVEAL);
     }
 
     function test_preflop_raise_call() public {
@@ -208,13 +209,13 @@ contract PokerTableTest is Test {
 
         // Dealer raises by 0.2 ether (total 0.25 = SB + 0.2)
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.RAISE, 0.2 ether);
+        poker.act(tid, IPokerTable.Action.RAISE, 0.2 ether);
 
         // BB calls
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CALL, 0);
+        poker.act(tid, IPokerTable.Action.CALL, 0);
 
-        _checkState(tid, PokerTable.State.FLOP_REVEAL);
+        _checkState(tid, IPokerTable.State.FLOP_REVEAL);
     }
 
     function test_wrongPlayer_reverts() public {
@@ -224,7 +225,7 @@ contract PokerTableTest is Test {
         // P2 tries to act but it's P1's turn (dealer acts first preflop)
         vm.prank(p2);
         vm.expectRevert("not your turn");
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
     }
 
     function test_check_when_must_call_reverts() public {
@@ -234,7 +235,7 @@ contract PokerTableTest is Test {
         // Dealer can't check preflop (must call the BB)
         vm.prank(p1);
         vm.expectRevert("must call, raise, or fold");
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
     }
 
     function test_postflop_nonDealer_actsFirst() public {
@@ -243,24 +244,24 @@ contract PokerTableTest is Test {
 
         // Call + check to get to flop
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CALL, 0);
+        poker.act(tid, IPokerTable.Action.CALL, 0);
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
         // Reveal flop
         uint8[] memory flop = new uint8[](3);
         flop[0] = 10; flop[1] = 23; flop[2] = 36;
         _doReveal(tid, flop);
-        _checkState(tid, PokerTable.State.FLOP_BET);
+        _checkState(tid, IPokerTable.State.FLOP_BET);
 
         // P1 (dealer) tries to act first - should fail
         vm.prank(p1);
         vm.expectRevert("not your turn");
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
         // P2 (non-dealer) acts first
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
     }
 
     function test_raise_too_small_reverts() public {
@@ -270,7 +271,7 @@ contract PokerTableTest is Test {
         // Min raise preflop = bigBlind (0.1 ether). Try raising 0.05 ether.
         vm.prank(p1);
         vm.expectRevert("raise too small");
-        poker.act(tid, PokerTable.Action.RAISE, 0.05 ether);
+        poker.act(tid, IPokerTable.Action.RAISE, 0.05 ether);
     }
 
     // ============================
@@ -283,9 +284,9 @@ contract PokerTableTest is Test {
 
         // Preflop: call + check
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CALL, 0);
+        poker.act(tid, IPokerTable.Action.CALL, 0);
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
         // Flop reveal: Q-clubs(10), T-diamonds(21), 7-hearts(31)
         uint8[] memory flop = new uint8[](3);
@@ -294,9 +295,9 @@ contract PokerTableTest is Test {
 
         // Flop: check-check
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
         // Turn reveal: 6-spades(43)
         uint8[] memory turn = new uint8[](1);
@@ -305,9 +306,9 @@ contract PokerTableTest is Test {
 
         // Turn: check-check
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
         // River reveal: 2-clubs(0)
         uint8[] memory river = new uint8[](1);
@@ -316,11 +317,11 @@ contract PokerTableTest is Test {
 
         // River: check-check
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
-        _checkState(tid, PokerTable.State.SHOWDOWN);
+        _checkState(tid, IPokerTable.State.SHOWDOWN);
 
         // P1 reveals: pair of Aces (Ac=12, Ad=25)
         vm.prank(p1);
@@ -331,7 +332,7 @@ contract PokerTableTest is Test {
         poker.revealHand(tid, "", [uint8(13), uint8(14)]);
 
         // P1 should win (pair of aces vs high card)
-        _checkState(tid, PokerTable.State.SETTLED);
+        _checkState(tid, IPokerTable.State.SETTLED);
 
         // P1 wins the pot (0.2 ether = 2x BB) + remaining stack
         // Both started with 1 ether, posted blinds, called.
@@ -357,7 +358,7 @@ contract PokerTableTest is Test {
         uint256 p2BalBefore = p2.balance;
         poker.claimTimeout(tid);
 
-        _checkState(tid, PokerTable.State.CANCELLED);
+        _checkState(tid, IPokerTable.State.CANCELLED);
         // P2 gets everything (both buy-ins)
         assertEq(p2.balance, p2BalBefore + 2 ether);
     }
@@ -370,7 +371,7 @@ contract PokerTableTest is Test {
         vm.warp(block.timestamp + 121);
 
         poker.claimTimeout(tid);
-        _checkState(tid, PokerTable.State.SETTLED);
+        _checkState(tid, IPokerTable.State.SETTLED);
     }
 
     function test_timeout_beforeDeadline_reverts() public {
@@ -392,7 +393,7 @@ contract PokerTableTest is Test {
         uint256 tid = _createAndJoin();
         _toPreflop(tid);
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.FOLD, 0);
+        poker.act(tid, IPokerTable.Action.FOLD, 0);
 
         vm.warp(block.timestamp + 121);
         vm.expectRevert("no timeout");
@@ -412,7 +413,7 @@ contract PokerTableTest is Test {
 
         // Dealer folds
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.FOLD, 0);
+        poker.act(tid, IPokerTable.Action.FOLD, 0);
 
         // P1 loses SB (0.05 ether). P2 wins pot.
         // P1 gets remaining stack: buyIn - SB = 0.95 ether
@@ -430,7 +431,7 @@ contract PokerTableTest is Test {
         _toPreflop(tid);
 
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.FOLD, 0);
+        poker.act(tid, IPokerTable.Action.FOLD, 0);
 
         // Total player balances should equal starting balances
         assertEq(p1.balance + p2.balance, 20 ether);
@@ -446,38 +447,38 @@ contract PokerTableTest is Test {
 
         // Preflop: call + check
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CALL, 0);
+        poker.act(tid, IPokerTable.Action.CALL, 0);
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
         // Flop
         uint8[] memory flop = new uint8[](3);
         flop[0] = 10; flop[1] = 21; flop[2] = 31;
         _doReveal(tid, flop);
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
         // Turn
         uint8[] memory turn = new uint8[](1);
         turn[0] = 43;
         _doReveal(tid, turn);
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
         // River
         uint8[] memory river = new uint8[](1);
         river[0] = 0;
         _doReveal(tid, river);
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
-        _checkState(tid, PokerTable.State.SHOWDOWN);
+        _checkState(tid, IPokerTable.State.SHOWDOWN);
 
         uint256 p1Before = p1.balance;
         uint256 p2Before = p2.balance;
@@ -490,7 +491,7 @@ contract PokerTableTest is Test {
         vm.prank(p2);
         poker.revealHand(tid, "", [uint8(27), uint8(40)]);
 
-        _checkState(tid, PokerTable.State.SETTLED);
+        _checkState(tid, IPokerTable.State.SETTLED);
 
         // Both should get roughly equal payouts (split pot)
         // Total conserved: both bought in for 1 ether each
@@ -511,13 +512,13 @@ contract PokerTableTest is Test {
 
         // P1 (dealer) raises big: 0.8 ether raise
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.RAISE, 0.8 ether);
+        poker.act(tid, IPokerTable.Action.RAISE, 0.8 ether);
 
         // P2 calls (0.8 + difference to match)
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CALL, 0);
+        poker.act(tid, IPokerTable.Action.CALL, 0);
 
-        _checkState(tid, PokerTable.State.FLOP_REVEAL);
+        _checkState(tid, IPokerTable.State.FLOP_REVEAL);
         assertEq(p1.balance + p2.balance, 20 ether - 2 * BUY_IN);
     }
 
@@ -528,15 +529,15 @@ contract PokerTableTest is Test {
         // P1 raises all-in (entire remaining stack)
         // P1 stack after SB = 0.95 ether. toCall = 0.05 ether. maxRaise = 0.9 ether.
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.RAISE, 0.9 ether);
+        poker.act(tid, IPokerTable.Action.RAISE, 0.9 ether);
 
         // P2 calls the all-in
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CALL, 0);
+        poker.act(tid, IPokerTable.Action.CALL, 0);
 
         // Both all-in, should skip through to showdown
         // After flop/turn/river reveals with no betting (both stacks = 0)
-        _checkState(tid, PokerTable.State.FLOP_REVEAL);
+        _checkState(tid, IPokerTable.State.FLOP_REVEAL);
     }
 
     function test_multipleRaises() public {
@@ -545,17 +546,17 @@ contract PokerTableTest is Test {
 
         // P1 raises min (0.1 ether)
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.RAISE, 0.1 ether);
+        poker.act(tid, IPokerTable.Action.RAISE, 0.1 ether);
 
         // P2 re-raises (0.1 ether on top)
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.RAISE, 0.1 ether);
+        poker.act(tid, IPokerTable.Action.RAISE, 0.1 ether);
 
         // P1 calls
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CALL, 0);
+        poker.act(tid, IPokerTable.Action.CALL, 0);
 
-        _checkState(tid, PokerTable.State.FLOP_REVEAL);
+        _checkState(tid, IPokerTable.State.FLOP_REVEAL);
     }
 
     // ============================
@@ -576,7 +577,7 @@ contract PokerTableTest is Test {
         uint256 p1Before = p1.balance;
         poker.claimTimeout(tid);
 
-        _checkState(tid, PokerTable.State.CANCELLED);
+        _checkState(tid, IPokerTable.State.CANCELLED);
         // P1 (who submitted) gets everything
         assertEq(p1.balance, p1Before + 2 ether);
     }
@@ -592,7 +593,7 @@ contract PokerTableTest is Test {
         uint256 p2Before = p2.balance;
         poker.claimTimeout(tid);
 
-        _checkState(tid, PokerTable.State.CANCELLED);
+        _checkState(tid, IPokerTable.State.CANCELLED);
         // Split
         assertEq(p1.balance + p2.balance, p1Before + p2Before + 2 ether);
     }
@@ -603,35 +604,35 @@ contract PokerTableTest is Test {
 
         // Play through to showdown
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CALL, 0);
+        poker.act(tid, IPokerTable.Action.CALL, 0);
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
         uint8[] memory flop = new uint8[](3);
         flop[0] = 10; flop[1] = 21; flop[2] = 31;
         _doReveal(tid, flop);
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
         uint8[] memory turn = new uint8[](1);
         turn[0] = 43;
         _doReveal(tid, turn);
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
         uint8[] memory river = new uint8[](1);
         river[0] = 0;
         _doReveal(tid, river);
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
-        _checkState(tid, PokerTable.State.SHOWDOWN);
+        _checkState(tid, IPokerTable.State.SHOWDOWN);
 
         // P1 reveals, P2 doesn't
         vm.prank(p1);
@@ -642,7 +643,7 @@ contract PokerTableTest is Test {
         uint256 p1Before = p1.balance;
         poker.claimTimeout(tid);
 
-        _checkState(tid, PokerTable.State.CANCELLED);
+        _checkState(tid, IPokerTable.State.CANCELLED);
         // P1 gets everything (they revealed, P2 didn't)
         assertEq(p1.balance, p1Before + 2 ether);
     }
@@ -730,9 +731,9 @@ contract PokerTableTest is Test {
 
         // Preflop: call + check
         vm.prank(p1);
-        strictPoker.act(tid, PokerTable.Action.CALL, 0);
+        strictPoker.act(tid, IPokerTable.Action.CALL, 0);
         vm.prank(p2);
-        strictPoker.act(tid, PokerTable.Action.CHECK, 0);
+        strictPoker.act(tid, IPokerTable.Action.CHECK, 0);
 
         // Flop reveal (both submit matching values)
         uint8[] memory flop = new uint8[](3);
@@ -744,9 +745,9 @@ contract PokerTableTest is Test {
 
         // Flop bet
         vm.prank(p2);
-        strictPoker.act(tid, PokerTable.Action.CHECK, 0);
+        strictPoker.act(tid, IPokerTable.Action.CHECK, 0);
         vm.prank(p1);
-        strictPoker.act(tid, PokerTable.Action.CHECK, 0);
+        strictPoker.act(tid, IPokerTable.Action.CHECK, 0);
 
         // Turn reveal
         uint8[] memory turn = new uint8[](1);
@@ -758,9 +759,9 @@ contract PokerTableTest is Test {
 
         // Turn bet
         vm.prank(p2);
-        strictPoker.act(tid, PokerTable.Action.CHECK, 0);
+        strictPoker.act(tid, IPokerTable.Action.CHECK, 0);
         vm.prank(p1);
-        strictPoker.act(tid, PokerTable.Action.CHECK, 0);
+        strictPoker.act(tid, IPokerTable.Action.CHECK, 0);
 
         // River reveal
         uint8[] memory river = new uint8[](1);
@@ -772,9 +773,9 @@ contract PokerTableTest is Test {
 
         // River bet
         vm.prank(p2);
-        strictPoker.act(tid, PokerTable.Action.CHECK, 0);
+        strictPoker.act(tid, IPokerTable.Action.CHECK, 0);
         vm.prank(p1);
-        strictPoker.act(tid, PokerTable.Action.CHECK, 0);
+        strictPoker.act(tid, IPokerTable.Action.CHECK, 0);
 
         // Showdown - reveal should fail
         vm.prank(p1);
@@ -791,35 +792,35 @@ contract PokerTableTest is Test {
         _toPreflop(tid);
 
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CALL, 0);
+        poker.act(tid, IPokerTable.Action.CALL, 0);
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
         uint8[] memory flop = new uint8[](3);
         flop[0] = 10; flop[1] = 21; flop[2] = 31;
         _doReveal(tid, flop);
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
         uint8[] memory turn = new uint8[](1);
         turn[0] = 43;
         _doReveal(tid, turn);
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
         uint8[] memory river = new uint8[](1);
         river[0] = 0;
         _doReveal(tid, river);
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
-        _checkState(tid, PokerTable.State.SHOWDOWN);
+        _checkState(tid, IPokerTable.State.SHOWDOWN);
 
         // Try to reveal two of the same card
         vm.prank(p1);
@@ -832,35 +833,35 @@ contract PokerTableTest is Test {
         _toPreflop(tid);
 
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CALL, 0);
+        poker.act(tid, IPokerTable.Action.CALL, 0);
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
         uint8[] memory flop = new uint8[](3);
         flop[0] = 10; flop[1] = 21; flop[2] = 31;
         _doReveal(tid, flop);
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
         uint8[] memory turn = new uint8[](1);
         turn[0] = 43;
         _doReveal(tid, turn);
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
         uint8[] memory river = new uint8[](1);
         river[0] = 0;
         _doReveal(tid, river);
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
-        _checkState(tid, PokerTable.State.SHOWDOWN);
+        _checkState(tid, IPokerTable.State.SHOWDOWN);
 
         // Try to claim a community card (10) as hole card
         vm.prank(p1);
@@ -873,35 +874,35 @@ contract PokerTableTest is Test {
         _toPreflop(tid);
 
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CALL, 0);
+        poker.act(tid, IPokerTable.Action.CALL, 0);
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
         uint8[] memory flop = new uint8[](3);
         flop[0] = 10; flop[1] = 21; flop[2] = 31;
         _doReveal(tid, flop);
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
         uint8[] memory turn = new uint8[](1);
         turn[0] = 43;
         _doReveal(tid, turn);
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
         uint8[] memory river = new uint8[](1);
         river[0] = 0;
         _doReveal(tid, river);
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
-        _checkState(tid, PokerTable.State.SHOWDOWN);
+        _checkState(tid, IPokerTable.State.SHOWDOWN);
 
         // P1 reveals Ac, Ad
         vm.prank(p1);
@@ -939,12 +940,12 @@ contract PokerTableTest is Test {
         _doShuffles(tid1);
         _doDeal(tid1);
         vm.prank(p1);
-        poker.act(tid1, PokerTable.Action.FOLD, 0);
+        poker.act(tid1, IPokerTable.Action.FOLD, 0);
 
-        _checkState(tid1, PokerTable.State.SETTLED);
+        _checkState(tid1, IPokerTable.State.SETTLED);
 
         // Table 2 should still be in shuffle phase
-        _checkState(tid2, PokerTable.State.SHUFFLE_P1);
+        _checkState(tid2, IPokerTable.State.SHUFFLE_P1);
 
         // Table 2 settlement should not be affected by table 1
         assertEq(p1.balance + p2.balance, 20 ether);
@@ -994,9 +995,9 @@ contract PokerTableTest is Test {
 
         // Preflop: call + check
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CALL, 0);
+        poker.act(tid, IPokerTable.Action.CALL, 0);
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
         // Flop reveal: P1 submits one set of cards
         uint8[] memory flop1 = new uint8[](3);
@@ -1037,11 +1038,11 @@ contract PokerTableTest is Test {
 
         // Preflop: dealer calls BB
         vm.prank(p1);
-        poker.act(tid, PokerTable.Action.CALL, 0);
+        poker.act(tid, IPokerTable.Action.CALL, 0);
 
         // BB checks -> flop reveal
         vm.prank(p2);
-        poker.act(tid, PokerTable.Action.CHECK, 0);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
 
         // Reveal flop
         uint8[] memory flop = new uint8[](3);
@@ -1051,6 +1052,6 @@ contract PokerTableTest is Test {
         // Post-flop: P2 acts first. Try to call when nothing is owed.
         vm.prank(p2);
         vm.expectRevert("nothing to call");
-        poker.act(tid, PokerTable.Action.CALL, 0);
+        poker.act(tid, IPokerTable.Action.CALL, 0);
     }
 }

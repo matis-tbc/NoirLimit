@@ -1,33 +1,11 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
+import "./interfaces/IPokerTable.sol";
 import "./interfaces/IVerifier.sol";
 import "./HandEvaluator.sol";
 
-contract PokerTable {
-
-    // -------------------------------------------------------
-    //  Types
-    // -------------------------------------------------------
-
-    enum State {
-        WAITING,       // 0
-        SHUFFLE_P1,    // 1
-        SHUFFLE_P2,    // 2
-        DEALING,       // 3
-        PREFLOP,       // 4
-        FLOP_REVEAL,   // 5
-        FLOP_BET,      // 6
-        TURN_REVEAL,   // 7
-        TURN_BET,      // 8
-        RIVER_REVEAL,  // 9
-        RIVER_BET,     // 10
-        SHOWDOWN,      // 11
-        SETTLED,       // 12
-        CANCELLED      // 13
-    }
-
-    enum Action { FOLD, CHECK, CALL, RAISE }
+contract PokerTable is IPokerTable {
 
     struct Table {
         address[2] players;
@@ -77,21 +55,6 @@ contract PokerTable {
     mapping(uint256 => Table) internal tables;
 
     // -------------------------------------------------------
-    //  Events
-    // -------------------------------------------------------
-
-    event TableCreated(uint256 indexed tableId, address creator, uint256 buyIn, uint256 bigBlind);
-    event PlayerJoined(uint256 indexed tableId, address player);
-    event TableCancelled(uint256 indexed tableId);
-    event ShuffleSubmitted(uint256 indexed tableId, address player, bytes32 newDeckCommitment);
-    event DecryptSubmitted(uint256 indexed tableId, address player);
-    event CommunityCardsRevealed(uint256 indexed tableId, uint8 newCardCount);
-    event ActionTaken(uint256 indexed tableId, address player, uint8 action, uint256 amount);
-    event HandRevealed(uint256 indexed tableId, address player, uint8 card0, uint8 card1);
-    event HandSettled(uint256 indexed tableId, address winner, uint256 pot);
-    event TimeoutClaimed(uint256 indexed tableId, address beneficiary);
-
-    // -------------------------------------------------------
     //  Modifiers
     // -------------------------------------------------------
 
@@ -122,7 +85,7 @@ contract PokerTable {
     //  View helpers
     // -------------------------------------------------------
 
-    function getTable(uint256 tid) external view returns (
+    function getTable(uint256 tid) external view override returns (
         address[2] memory players,
         uint256[2] memory stacks,
         uint256 pot,
@@ -138,7 +101,7 @@ contract PokerTable {
     //  Table management
     // -------------------------------------------------------
 
-    function createTable(uint256 bigBlind) external payable returns (uint256 tableId) {
+    function createTable(uint256 bigBlind) external payable override returns (uint256 tableId) {
         require(msg.value > 0, "must send buy-in");
         require(bigBlind > 0 && bigBlind <= msg.value, "invalid big blind");
         require(bigBlind % 2 == 0, "big blind must be even");
@@ -154,7 +117,7 @@ contract PokerTable {
         emit TableCreated(tableId, msg.sender, msg.value, bigBlind);
     }
 
-    function joinTable(uint256 tableId) external payable {
+    function joinTable(uint256 tableId) external payable override {
         Table storage t = tables[tableId];
         require(t.state == State.WAITING, "not waiting");
         require(msg.value == t.buyIn, "must match buy-in");
@@ -182,7 +145,7 @@ contract PokerTable {
         emit PlayerJoined(tableId, msg.sender);
     }
 
-    function cancelTable(uint256 tableId) external {
+    function cancelTable(uint256 tableId) external override {
         Table storage t = tables[tableId];
         require(t.state == State.WAITING, "not waiting");
         require(msg.sender == t.players[0], "only creator");
@@ -198,7 +161,7 @@ contract PokerTable {
     // -------------------------------------------------------
 
     function registerPublicKey(uint256 tableId, bytes32 publicKey)
-        external onlyPlayer(tableId)
+        external override onlyPlayer(tableId)
     {
         Table storage t = tables[tableId];
         require(t.state == State.SHUFFLE_P1 || t.state == State.SHUFFLE_P2, "not in shuffle phase");
@@ -213,7 +176,7 @@ contract PokerTable {
     // -------------------------------------------------------
 
     function submitShuffle(uint256 tableId, bytes calldata proof, bytes32 newDeckCommitment)
-        external onlyPlayer(tableId) beforeDeadline(tableId)
+        external override onlyPlayer(tableId) beforeDeadline(tableId)
     {
         Table storage t = tables[tableId];
         uint8 pi = _pindex(t);
@@ -257,7 +220,7 @@ contract PokerTable {
         uint8[] calldata cardValues,
         bytes32[] calldata cardCommitments
     )
-        external onlyPlayer(tableId) beforeDeadline(tableId)
+        external override onlyPlayer(tableId) beforeDeadline(tableId)
     {
         Table storage t = tables[tableId];
         require(
@@ -347,7 +310,7 @@ contract PokerTable {
     // -------------------------------------------------------
 
     function act(uint256 tableId, Action action, uint256 raiseAmount)
-        external onlyPlayer(tableId) beforeDeadline(tableId)
+        external override onlyPlayer(tableId) beforeDeadline(tableId)
     {
         Table storage t = tables[tableId];
         require(_isBettingState(t.state), "not betting");
@@ -418,7 +381,7 @@ contract PokerTable {
     // -------------------------------------------------------
 
     function revealHand(uint256 tableId, bytes calldata proof, uint8[2] calldata cards)
-        external onlyPlayer(tableId) beforeDeadline(tableId)
+        external override onlyPlayer(tableId) beforeDeadline(tableId)
     {
         Table storage t = tables[tableId];
         require(t.state == State.SHOWDOWN, "not in showdown");
@@ -466,7 +429,7 @@ contract PokerTable {
     //  Timeout
     // -------------------------------------------------------
 
-    function claimTimeout(uint256 tableId) external {
+    function claimTimeout(uint256 tableId) external override {
         Table storage t = tables[tableId];
         require(t.players[0] != address(0), "table not found");
         require(t.state != State.WAITING && t.state != State.SETTLED && t.state != State.CANCELLED, "no timeout");
