@@ -36,7 +36,7 @@ interface IPokerTable {
     event PlayerJoined(uint256 indexed tableId, address player);
     event TableCancelled(uint256 indexed tableId);
     event ShuffleSubmitted(uint256 indexed tableId, address player, bytes32 newDeckCommitment);
-    event DecryptSubmitted(uint256 indexed tableId, address player);
+    event DecryptSubmitted(uint256 indexed tableId, address player, uint8[] cardIndices, bytes32[] partialDecryptionValues);
     event CommunityCardsRevealed(uint256 indexed tableId, uint8 newCardCount);
     event ActionTaken(uint256 indexed tableId, address player, uint8 action, uint256 amount);
     event HandRevealed(uint256 indexed tableId, address player, uint8 card0, uint8 card1);
@@ -56,8 +56,24 @@ interface IPokerTable {
     // -------------------------------------------------------
 
     function registerPublicKey(uint256 tableId, bytes32 publicKey) external;
-    function submitShuffle(uint256 tableId, bytes calldata proof, bytes32 newDeckCommitment) external;
-    function submitDecrypt(uint256 tableId, bytes calldata proof, uint8[] calldata cardValues, bytes32[] calldata cardCommitments) external;
+
+    function submitShuffle(
+        uint256 tableId,
+        bytes calldata proof,
+        bytes32 newDeckCommitment,
+        bytes32[52] calldata cardCommitments,
+        bytes32[52] calldata cardRandomizers,
+        bytes32[52] calldata cardMaskedPayloads
+    ) external;
+
+    function submitDecrypt(
+        uint256 tableId,
+        uint8[] calldata cardIndices,
+        bytes32[] calldata partialDecryptionValues,
+        bytes[] calldata proofs,
+        uint8[] calldata cardValues
+    ) external;
+
     function act(uint256 tableId, Action action, uint256 raiseAmount) external;
     function revealHand(uint256 tableId, bytes calldata proof, uint8[2] calldata cards) external;
     function claimTimeout(uint256 tableId) external;
@@ -73,5 +89,15 @@ interface IPokerTable {
         State state,
         uint8 communityCardCount,
         uint8 turn
+    );
+
+    function getWinner(uint256 tid) external view returns (address);
+
+    function getEncryptedCard(uint256 tid, uint8 cardIndex) external view returns (
+        bytes32 commitment, bytes32 randomizer, bytes32 maskedPayload
+    );
+
+    function getPartialDecryption(uint256 tid, uint8 cardIndex, uint8 playerIndex) external view returns (
+        bytes32 share
     );
 }

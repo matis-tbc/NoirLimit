@@ -7,6 +7,13 @@ import "./HandEvaluator.sol";
 
 contract PokerTable is IPokerTable {
 
+    // Card index convention:
+    // [0-1]  Player 0 hole cards
+    // [2-3]  Player 1 hole cards
+    // [4-6]  Flop
+    // [7]    Turn
+    // [8]    River
+
     struct Table {
         address[2] players;
         uint256[2] stacks;
@@ -32,12 +39,19 @@ contract PokerTable is IPokerTable {
         uint8[2][2] holeCards; // [player][card]
         bool[2] handRevealed;
 
-        // Card commitments from deal phase (used to bind reveals to dealt cards)
-        bytes32[2][2] holeCardCommitments; // [player][card] commitment from deal
-        bytes32[2] playerPublicKeys;       // public keys registered at join
+        bytes32[2] playerPublicKeys;
 
-        // First submitter's claimed card values during community reveal
-        // Second submitter must match these
+        // Per-card encrypted state stored after final shuffle
+        bytes32[52] encCardCommitments;
+        bytes32[52] encCardRandomizers;
+        bytes32[52] encCardMaskedPayloads;
+
+        // Partial decryption shares: partialDecryptions[playerIndex][cardIndex]
+        bytes32[52][2] partialDecryptions;
+
+        address winner;
+
+        // Community card value consensus
         uint8[] pendingCardValues;
     }
 
@@ -47,6 +61,7 @@ contract PokerTable is IPokerTable {
 
     uint256 public nextTableId;
     uint256 public actionTimeout = 120;
+    bool public demoMode;
 
     IVerifier public shuffleVerifier;
     IVerifier public decryptVerifier;
@@ -75,10 +90,11 @@ contract PokerTable is IPokerTable {
     //  Constructor
     // -------------------------------------------------------
 
-    constructor(address _shuffle, address _decrypt, address _reveal) {
+    constructor(address _shuffle, address _decrypt, address _reveal, bool _demoMode) {
         shuffleVerifier = IVerifier(_shuffle);
         decryptVerifier = IVerifier(_decrypt);
         revealVerifier  = IVerifier(_reveal);
+        demoMode = _demoMode;
     }
 
     // -------------------------------------------------------
@@ -95,6 +111,26 @@ contract PokerTable is IPokerTable {
     ) {
         Table storage t = tables[tid];
         return (t.players, t.stacks, t.pot, t.state, t.communityCardCount, t.turn);
+    }
+
+    function getWinner(uint256 tid) external view override returns (address) {
+        return tables[tid].winner;
+    }
+
+    function getEncryptedCard(uint256 tid, uint8 cardIndex) external view override returns (
+        bytes32 commitment, bytes32 randomizer, bytes32 maskedPayload
+    ) {
+        require(cardIndex < 52, "invalid card index");
+        Table storage t = tables[tid];
+        return (t.encCardCommitments[cardIndex], t.encCardRandomizers[cardIndex], t.encCardMaskedPayloads[cardIndex]);
+    }
+
+    function getPartialDecryption(uint256 tid, uint8 cardIndex, uint8 playerIndex) external view override returns (
+        bytes32 share
+    ) {
+        require(cardIndex < 52, "invalid card index");
+        require(playerIndex < 2, "invalid player index");
+        return tables[tid].partialDecryptions[playerIndex][cardIndex];
     }
 
     // -------------------------------------------------------
@@ -125,7 +161,6 @@ contract PokerTable is IPokerTable {
 
         t.players[1] = msg.sender;
         t.stacks[1]  = msg.value;
-        // Public keys are registered via registerPublicKey before shuffle
 
         // Post blinds: player 0 = dealer = small blind, player 1 = big blind
         uint256 sb = t.bigBlind / 2;
@@ -175,7 +210,14 @@ contract PokerTable is IPokerTable {
     //  Shuffle phase
     // -------------------------------------------------------
 
-    function submitShuffle(uint256 tableId, bytes calldata proof, bytes32 newDeckCommitment)
+    function submitShuffle(
+        uint256 tableId,
+        bytes calldata proof,
+        bytes32 newDeckCommitment,
+        bytes32[52] calldata cardCommitments,
+        bytes32[52] calldata cardRandomizers,
+        bytes32[52] calldata cardMaskedPayloads
+    )
         external override onlyPlayer(tableId) beforeDeadline(tableId)
     {
         Table storage t = tables[tableId];
@@ -192,7 +234,7 @@ contract PokerTable is IPokerTable {
         bytes32[] memory pub = new bytes32[](2);
         pub[0] = t.deckCommitment;
         pub[1] = newDeckCommitment;
-        require(shuffleVerifier.verify(proof, pub), "bad shuffle proof");
+        require(demoMode || shuffleVerifier.verify(proof, pub), "bad shuffle proof");
 
         t.deckCommitment = newDeckCommitment;
 
@@ -202,6 +244,14 @@ contract PokerTable is IPokerTable {
             // Both players must have registered public keys before dealing
             require(t.playerPublicKeys[0] != bytes32(0), "P1 missing public key");
             require(t.playerPublicKeys[1] != bytes32(0), "P2 missing public key");
+
+            // Store per-card encrypted state from the final shuffled deck
+            for (uint256 i = 0; i < 52; i++) {
+                t.encCardCommitments[i] = cardCommitments[i];
+                t.encCardRandomizers[i] = cardRandomizers[i];
+                t.encCardMaskedPayloads[i] = cardMaskedPayloads[i];
+            }
+
             t.state = State.DEALING;
             t.submitted[0] = false;
             t.submitted[1] = false;
@@ -216,9 +266,10 @@ contract PokerTable is IPokerTable {
 
     function submitDecrypt(
         uint256 tableId,
-        bytes calldata proof,
-        uint8[] calldata cardValues,
-        bytes32[] calldata cardCommitments
+        uint8[] calldata cardIndices,
+        bytes32[] calldata partialDecryptionValues,
+        bytes[] calldata proofs,
+        uint8[] calldata cardValues
     )
         external override onlyPlayer(tableId) beforeDeadline(tableId)
     {
@@ -231,22 +282,32 @@ contract PokerTable is IPokerTable {
         uint8 pi = _pindex(t);
         require(!t.submitted[pi], "already submitted");
 
-        // Store hole card commitments during DEALING
-        if (t.state == State.DEALING) {
-            require(cardCommitments.length == 2, "must provide 2 card commitments");
-            t.holeCardCommitments[pi][0] = cardCommitments[0];
-            t.holeCardCommitments[pi][1] = cardCommitments[1];
+        // Validate parallel arrays
+        require(cardIndices.length > 0, "no cards");
+        require(cardIndices.length == partialDecryptionValues.length, "length mismatch");
+        require(cardIndices.length == proofs.length, "length mismatch");
+
+        // Validate card indices match expected for this phase
+        uint8[] memory expected = _expectedCardIndices(t.state, pi);
+        require(cardIndices.length == expected.length, "wrong number of cards");
+        for (uint256 i = 0; i < expected.length; i++) {
+            require(cardIndices[i] == expected[i], "unexpected card index");
         }
 
-        // Verify decrypt proof
-        // Public inputs: deck commitment, player public key, and card commitments if provided
-        bytes32[] memory pub = new bytes32[](5);
-        pub[0] = t.deckCommitment;
-        pub[1] = cardCommitments.length > 0 ? cardCommitments[0] : bytes32(0);
-        pub[2] = cardCommitments.length > 1 ? cardCommitments[1] : bytes32(0);
-        pub[3] = bytes32(uint256(cardValues.length));
-        pub[4] = t.playerPublicKeys[pi];
-        require(decryptVerifier.verify(proof, pub), "bad decrypt proof");
+        // Per-card proof verification
+        for (uint256 i = 0; i < cardIndices.length; i++) {
+            uint8 ci = cardIndices[i];
+
+            bytes32[] memory pub = new bytes32[](5);
+            pub[0] = t.encCardCommitments[ci];
+            pub[1] = t.encCardRandomizers[ci];
+            pub[2] = t.encCardMaskedPayloads[ci];
+            pub[3] = partialDecryptionValues[i];
+            pub[4] = t.playerPublicKeys[pi];
+            require(demoMode || decryptVerifier.verify(proofs[i], pub), "bad decrypt proof");
+
+            t.partialDecryptions[pi][ci] = partialDecryptionValues[i];
+        }
 
         t.submitted[pi] = true;
 
@@ -255,12 +316,10 @@ contract PokerTable is IPokerTable {
             t.state == State.TURN_REVEAL || t.state == State.RIVER_REVEAL;
         if (isRevealPhase && cardValues.length > 0) {
             if (t.pendingCardValues.length == 0) {
-                // First submitter: store pending values
                 for (uint256 i = 0; i < cardValues.length; i++) {
                     t.pendingCardValues.push(cardValues[i]);
                 }
             } else {
-                // Second submitter: must match first submitter's values
                 require(cardValues.length == t.pendingCardValues.length, "card count mismatch");
                 for (uint256 i = 0; i < cardValues.length; i++) {
                     require(cardValues[i] == t.pendingCardValues[i], "card value mismatch between players");
@@ -268,27 +327,24 @@ contract PokerTable is IPokerTable {
             }
         }
 
-        emit DecryptSubmitted(tableId, msg.sender);
+        emit DecryptSubmitted(tableId, msg.sender, cardIndices, partialDecryptionValues);
 
         // When both have submitted, advance
         if (t.submitted[0] && t.submitted[1]) {
             if (t.state == State.DEALING) {
                 t.state = State.PREFLOP;
-                // Blinds already set in joinTable
                 t.actedSinceLastRaise[0] = false;
                 t.actedSinceLastRaise[1] = false;
             } else {
-                // Both players agreed on card values, store them
-                uint8 expected = t.state == State.FLOP_REVEAL ? 3 : 1;
-                require(t.pendingCardValues.length == expected, "wrong card count");
-                for (uint8 i = 0; i < expected; i++) {
+                uint8 expectedCount = t.state == State.FLOP_REVEAL ? 3 : 1;
+                require(t.pendingCardValues.length == expectedCount, "wrong card count");
+                for (uint8 i = 0; i < expectedCount; i++) {
                     require(t.pendingCardValues[i] < 52, "invalid card");
                     t.communityCards[t.communityCardCount++] = t.pendingCardValues[i];
                 }
                 delete t.pendingCardValues;
                 emit CommunityCardsRevealed(tableId, t.communityCardCount);
 
-                // Next betting round
                 State nextBet;
                 if (t.state == State.FLOP_REVEAL)  nextBet = State.FLOP_BET;
                 else if (t.state == State.TURN_REVEAL) nextBet = State.TURN_BET;
@@ -355,7 +411,6 @@ contract PokerTable is IPokerTable {
             t.lastRaiseSize = actualRaise;
             amountPut = totalPut;
 
-            // Reset acted flags
             t.actedSinceLastRaise[0] = false;
             t.actedSinceLastRaise[1] = false;
         }
@@ -363,7 +418,6 @@ contract PokerTable is IPokerTable {
         t.actedSinceLastRaise[pi] = true;
         emit ActionTaken(tableId, msg.sender, uint8(action), amountPut);
 
-        // Check if round is over
         bool betsEqual = t.roundContribution[0] == t.roundContribution[1];
         bool bothActed = t.actedSinceLastRaise[0] && t.actedSinceLastRaise[1];
         bool callerAllIn = (action == Action.CALL) && (t.stacks[pi] == 0);
@@ -405,13 +459,16 @@ contract PokerTable is IPokerTable {
             require(cards[1] != t.holeCards[opp][0] && cards[1] != t.holeCards[opp][1], "card already claimed");
         }
 
+        // Hole card commitments come from the encrypted deck (set during P2 shuffle)
+        require(t.encCardCommitments[pi * 2] != bytes32(0), "deck not stored");
+
         // Public inputs match reveal circuit: card_commitments[2], revealed_cards[2]
         bytes32[] memory pub = new bytes32[](4);
-        pub[0] = t.holeCardCommitments[pi][0];     // card_commitments[0]
-        pub[1] = t.holeCardCommitments[pi][1];     // card_commitments[1]
-        pub[2] = bytes32(uint256(cards[0]));        // revealed_cards[0]
-        pub[3] = bytes32(uint256(cards[1]));        // revealed_cards[1]
-        require(revealVerifier.verify(proof, pub), "bad reveal proof");
+        pub[0] = t.encCardCommitments[pi * 2];       // card_commitments[0]
+        pub[1] = t.encCardCommitments[pi * 2 + 1];   // card_commitments[1]
+        pub[2] = bytes32(uint256(cards[0]));           // revealed_cards[0]
+        pub[3] = bytes32(uint256(cards[1]));           // revealed_cards[1]
+        require(demoMode || revealVerifier.verify(proof, pub), "bad reveal proof");
 
         t.holeCards[pi][0] = cards[0];
         t.holeCards[pi][1] = cards[1];
@@ -436,10 +493,8 @@ contract PokerTable is IPokerTable {
         require(block.timestamp > t.deadline, "not timed out");
 
         if (t.state == State.SHUFFLE_P1) {
-            // P1 stalled
             _settleTimeout(tableId, 1);
         } else if (t.state == State.SHUFFLE_P2) {
-            // P2 stalled
             _settleTimeout(tableId, 0);
         } else if (
             t.state == State.DEALING  || t.state == State.FLOP_REVEAL ||
@@ -450,11 +505,9 @@ contract PokerTable is IPokerTable {
             } else if (!t.submitted[0] && t.submitted[1]) {
                 _settleTimeout(tableId, 1);
             } else {
-                // Neither submitted: split
                 _settleSplit(tableId, State.CANCELLED);
             }
         } else if (_isBettingState(t.state)) {
-            // Acting player timed out - they forfeit
             _settleWinner(tableId, 1 - t.turn);
         } else if (t.state == State.SHOWDOWN) {
             if (t.handRevealed[0] && !t.handRevealed[1]) {
@@ -468,13 +521,44 @@ contract PokerTable is IPokerTable {
     }
 
     // -------------------------------------------------------
+    //  Internals: card index validation
+    // -------------------------------------------------------
+
+    function _expectedCardIndices(State state, uint8 playerIndex)
+        internal pure returns (uint8[] memory)
+    {
+        if (state == State.DEALING) {
+            // Each player decrypts the OTHER player's hole cards
+            uint8 otherPlayer = 1 - playerIndex;
+            uint8[] memory indices = new uint8[](2);
+            indices[0] = otherPlayer * 2;
+            indices[1] = otherPlayer * 2 + 1;
+            return indices;
+        } else if (state == State.FLOP_REVEAL) {
+            uint8[] memory indices = new uint8[](3);
+            indices[0] = 4;
+            indices[1] = 5;
+            indices[2] = 6;
+            return indices;
+        } else if (state == State.TURN_REVEAL) {
+            uint8[] memory indices = new uint8[](1);
+            indices[0] = 7;
+            return indices;
+        } else if (state == State.RIVER_REVEAL) {
+            uint8[] memory indices = new uint8[](1);
+            indices[0] = 8;
+            return indices;
+        }
+        revert("invalid state for decrypt");
+    }
+
+    // -------------------------------------------------------
     //  Internals: state transitions
     // -------------------------------------------------------
 
     function _startBettingRound(uint256 tableId, State newState) internal {
         Table storage t = tables[tableId];
 
-        // If either player is all-in, skip this betting round
         if (t.stacks[0] == 0 || t.stacks[1] == 0) {
             t.state = newState;
             _endBettingRound(tableId);
@@ -520,6 +604,7 @@ contract PokerTable is IPokerTable {
         uint256 losePay = t.stacks[loser];
 
         t.state = State.SETTLED;
+        t.winner = t.players[winner];
         t.pot = 0;
         t.stacks[0] = 0;
         t.stacks[1] = 0;
@@ -539,6 +624,7 @@ contract PokerTable is IPokerTable {
         uint256 total = t.pot + t.stacks[0] + t.stacks[1];
 
         t.state = State.CANCELLED;
+        t.winner = t.players[beneficiary];
         t.pot = 0;
         t.stacks[0] = 0;
         t.stacks[1] = 0;
@@ -553,6 +639,7 @@ contract PokerTable is IPokerTable {
         uint256 total = t.pot + t.stacks[0] + t.stacks[1];
 
         t.state = endState;
+        t.winner = address(0);
         t.pot = 0;
         t.stacks[0] = 0;
         t.stacks[1] = 0;
