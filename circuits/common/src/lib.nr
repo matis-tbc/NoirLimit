@@ -1,13 +1,12 @@
-pub global DECK_SIZE: u32 = 8;
-pub global FULL_DECK_SIZE: u32 = 52;
+use std::hash::pedersen_hash;
 
-global HASH_C0: Field = 17;
-global HASH_C1: Field = 29;
-global HASH_C2: Field = 43;
-global HASH_C3: Field = 71;
-global HASH_C4: Field = 97;
+pub global DECK_SIZE: u32 = 52;
+
+// Domain separation constants for different hash contexts
 global KEYGEN_DOMAIN: Field = 113;
 global SHARE_DOMAIN: Field = 131;
+global MASK_DOMAIN: Field = 97;
+global DECK_DOMAIN: Field = 71;
 
 pub type Card = u8;
 pub type Deck<let N: u32> = [EncryptedCard; N];
@@ -26,26 +25,26 @@ pub fn empty_encrypted_card() -> EncryptedCard {
     }
 }
 
-// Week 4 uses a poseidon-style placeholder hash so we can exercise shuffle semantics
-// without committing to the final mental-poker primitive yet.
-pub fn poseidonish_mix(left: Field, right: Field) -> Field {
-    let x = left + HASH_C0;
-    let y = right + HASH_C1;
-    let sum = x + y + HASH_C2;
-    (sum * sum * sum) + (x * y) + HASH_C3
+pub fn hash2(left: Field, right: Field) -> Field {
+    pedersen_hash([left, right])
 }
 
-pub fn poseidonish_mask(randomizer: Field) -> Field {
-    poseidonish_mix(randomizer, HASH_C4)
+pub fn hash3(a: Field, b: Field, c: Field) -> Field {
+    pedersen_hash([a, b, c])
+}
+
+// Domain-separated hash for masking
+pub fn mask_from_randomizer(randomizer: Field) -> Field {
+    hash2(randomizer, MASK_DOMAIN)
 }
 
 pub fn commit_card(card: Card, secret_nonce: Field) -> Field {
-    poseidonish_mix(card as Field, secret_nonce)
+    hash2(card as Field, secret_nonce)
 }
 
 pub fn encrypt_card(card: Card, secret_nonce: Field, mask_randomness: Field) -> EncryptedCard {
     let card_commitment = commit_card(card, secret_nonce);
-    let mask = poseidonish_mask(mask_randomness);
+    let mask = mask_from_randomizer(mask_randomness);
 
     EncryptedCard {
         card_commitment,
@@ -56,8 +55,8 @@ pub fn encrypt_card(card: Card, secret_nonce: Field, mask_randomness: Field) -> 
 
 pub fn rerandomize_card(previous: EncryptedCard, rerandomization: Field) -> EncryptedCard {
     let new_randomizer = previous.randomizer + rerandomization;
-    let previous_mask = poseidonish_mask(previous.randomizer);
-    let new_mask = poseidonish_mask(new_randomizer);
+    let previous_mask = mask_from_randomizer(previous.randomizer);
+    let new_mask = mask_from_randomizer(new_randomizer);
 
     EncryptedCard {
         card_commitment: previous.card_commitment,
@@ -79,16 +78,16 @@ pub fn assert_is_valid_rerandomization(
 }
 
 pub fn derive_player_public_key(player_secret_key: Field) -> Field {
-    poseidonish_mix(player_secret_key, KEYGEN_DOMAIN)
+    hash2(player_secret_key, KEYGEN_DOMAIN)
 }
 
 pub fn partial_decryption_share(
     encrypted_card: EncryptedCard,
     player_secret_key: Field,
 ) -> Field {
-    let key_stream = poseidonish_mix(player_secret_key, encrypted_card.randomizer);
-    let card_binding = poseidonish_mix(encrypted_card.card_commitment, encrypted_card.masked_payload);
-    poseidonish_mix(poseidonish_mix(key_stream, card_binding), SHARE_DOMAIN)
+    let key_stream = hash2(player_secret_key, encrypted_card.randomizer);
+    let card_binding = hash2(encrypted_card.card_commitment, encrypted_card.masked_payload);
+    hash2(hash2(key_stream, card_binding), SHARE_DOMAIN)
 }
 
 pub fn assert_valid_partial_decryption(
@@ -105,16 +104,15 @@ pub fn assert_valid_partial_decryption(
 }
 
 pub fn hash_encrypted_card(card: EncryptedCard) -> Field {
-    let with_commitment = poseidonish_mix(card.card_commitment, card.randomizer);
-    poseidonish_mix(with_commitment, card.masked_payload)
+    hash3(card.card_commitment, card.randomizer, card.masked_payload)
 }
 
 pub fn deck_commitment<let N: u32>(deck: [EncryptedCard; N]) -> Field {
-    let mut state = poseidonish_mix(N as Field, HASH_C0);
+    let mut state = hash2(N as Field, DECK_DOMAIN);
 
     for i in 0..N {
         let card_hash = hash_encrypted_card(deck[i]);
-        state = poseidonish_mix(state, card_hash);
+        state = hash2(state, card_hash);
     }
 
     state
@@ -165,9 +163,9 @@ pub fn shuffled_rerandomized_deck<let N: u32>(
     new_deck
 }
 
-pub fn assert_scale_ready_fixture_pattern() {
-    let deck_52 = ordered_encrypted_deck::<FULL_DECK_SIZE>(0, 5000, 9000);
-    assert(deck_52[0].card_commitment != 0, "first full-deck fixture should be populated");
-    assert(deck_52[51].card_commitment != 0, "last full-deck fixture should be populated");
-    assert(deck_commitment(deck_52) != 0, "full-deck fixture should hash cleanly");
+pub fn assert_full_deck_fixture_valid() {
+    let deck = ordered_encrypted_deck::<DECK_SIZE>(0, 5000, 9000);
+    assert(deck[0].card_commitment != 0, "first card should be populated");
+    assert(deck[DECK_SIZE - 1].card_commitment != 0, "last card should be populated");
+    assert(deck_commitment(deck) != 0, "deck should hash cleanly");
 }
