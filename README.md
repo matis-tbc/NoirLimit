@@ -14,14 +14,17 @@ MVP in progress. Core contracts and circuits are built and tested. Frontend not 
 
 **What works:**
 - PokerTable.sol: complete state machine (14 states), betting, timeouts, payouts, hand evaluation
+- Per-card encrypted deck storage with threshold decryption (protocol-correct per zkShuffle/Barnett-Smart)
 - 3 Noir circuits (shuffle, decrypt, reveal) using Pedersen hash at 52-card scale
 - Generated Solidity verifier contracts from compiled circuits
-- 60 contract tests, 17 circuit tests (all passing)
+- Demo mode flag for testnet deployment (skips proof verification)
+- Deploy script + scripted end-to-end demo hand
+- 65 contract tests, 17 circuit tests (all passing)
 
 **What's next:**
-- Integration test with real proofs end-to-end
+- SpectatorMarket.sol implementation (spectator wagering)
 - Frontend (wallet connect, table UI, in-browser proof generation)
-- Testnet deployment
+- Testnet deployment to Sepolia
 
 ## Project Structure
 
@@ -38,7 +41,8 @@ NoirLimit/
 │   │   ├── HandEvaluator.sol # Poker hand ranking (best 5 of 7)
 │   │   ├── interfaces/      # IPokerTable, ISpectatorMarket, IVerifier
 │   │   └── mocks/           # MockVerifier, RejectingVerifier for tests
-│   ├── test/                # Foundry test suite (60 tests)
+│   ├── test/                # Foundry test suite (65 tests)
+│   ├── script/              # Deploy.s.sol, DemoHand.s.sol
 │   └── verifiers-generated/ # Solidity verifiers generated from circuits via bb
 ├── frontend/                # React app (not yet implemented)
 └── REVIEWED_PLAN.md         # Protocol design document

@@ -44,6 +44,6 @@ Three ZK verifier contracts (shuffle, decrypt, reveal) are injected via construc
 
 ```bash
 forge build    # compile contracts
-forge test     # run all 60 tests
+forge test     # run all 65 tests
 forge test -vv # verbose output with gas
 ```
