@@ -656,18 +656,22 @@ contract PokerTableTest is Test {
         vm.prank(p2);
         strictPoker.joinTable{value: BUY_IN}(tid);
 
-        vm.prank(p1);
-        strictPoker.registerPublicKey(tid, bytes32(uint256(0xaa)));
-        vm.prank(p2);
-        strictPoker.registerPublicKey(tid, bytes32(uint256(0xbb)));
+        vm.prank(p1); strictPoker.registerPublicKey(tid, bytes32(uint256(0xaa)));
+        vm.prank(p2); strictPoker.registerPublicKey(tid, bytes32(uint256(0xbb)));
 
         vm.prank(p1);
         strictPoker.submitShuffle(tid, "", bytes32(uint256(1)), _emptyDeck(), _emptyDeck(), _emptyDeck());
-        (bytes32[52] memory c, bytes32[52] memory r, bytes32[52] memory p) = _sampleDeck();
-        vm.prank(p2);
-        strictPoker.submitShuffle(tid, "", bytes32(uint256(2)), c, r, p);
+        {
+            (bytes32[52] memory c, bytes32[52] memory r, bytes32[52] memory p) = _sampleDeck();
+            vm.prank(p2);
+            strictPoker.submitShuffle(tid, "", bytes32(uint256(2)), c, r, p);
+        }
 
         // Decrypt with rejector should fail
+        _expectDecryptRevert(strictPoker, tid);
+    }
+
+    function _expectDecryptRevert(PokerTable pk, uint256 tid) internal {
         uint8[] memory indices = new uint8[](2);
         indices[0] = 2; indices[1] = 3;
         bytes32[] memory shares = new bytes32[](2);
@@ -679,7 +683,7 @@ contract PokerTableTest is Test {
 
         vm.prank(p1);
         vm.expectRevert("bad decrypt proof");
-        strictPoker.submitDecrypt(tid, indices, shares, proofs, noCards);
+        pk.submitDecrypt(tid, indices, shares, proofs, noCards);
     }
 
     function test_badRevealProof_reverts() public {
@@ -689,102 +693,93 @@ contract PokerTableTest is Test {
         vm.deal(p1, 10 ether);
         vm.deal(p2, 10 ether);
 
+        uint256 tid = _setupAndDeal(strictPoker);
+
+        // Play through to showdown using check-check on every street
+        _playToShowdown(strictPoker, tid);
+
+        // Showdown: reveal should fail due to rejecting verifier
         vm.prank(p1);
-        uint256 tid = strictPoker.createTable{value: BUY_IN}(BIG_BLIND);
+        vm.expectRevert("bad reveal proof");
+        strictPoker.revealHand(tid, "", [uint8(12), uint8(25)]);
+    }
+
+    // Helpers for strict-verifier tests (separate PokerTable instance)
+    function _setupAndDeal(PokerTable pk) internal returns (uint256 tid) {
+        vm.prank(p1);
+        tid = pk.createTable{value: BUY_IN}(BIG_BLIND);
         vm.prank(p2);
-        strictPoker.joinTable{value: BUY_IN}(tid);
+        pk.joinTable{value: BUY_IN}(tid);
+
+        vm.prank(p1); pk.registerPublicKey(tid, bytes32(uint256(0xaa)));
+        vm.prank(p2); pk.registerPublicKey(tid, bytes32(uint256(0xbb)));
 
         vm.prank(p1);
-        strictPoker.registerPublicKey(tid, bytes32(uint256(0xaa)));
-        vm.prank(p2);
-        strictPoker.registerPublicKey(tid, bytes32(uint256(0xbb)));
-
-        vm.prank(p1);
-        strictPoker.submitShuffle(tid, "", bytes32(uint256(1)), _emptyDeck(), _emptyDeck(), _emptyDeck());
+        pk.submitShuffle(tid, "", bytes32(uint256(1)), _emptyDeck(), _emptyDeck(), _emptyDeck());
         (bytes32[52] memory c, bytes32[52] memory r, bytes32[52] memory p) = _sampleDeck();
         vm.prank(p2);
-        strictPoker.submitShuffle(tid, "", bytes32(uint256(2)), c, r, p);
+        pk.submitShuffle(tid, "", bytes32(uint256(2)), c, r, p);
 
-        // Deal (mock verifier accepts)
-        uint8[] memory p1Idx = new uint8[](2);
-        p1Idx[0] = 2; p1Idx[1] = 3;
-        bytes32[] memory p1Sh = new bytes32[](2);
-        p1Sh[0] = bytes32(uint256(1)); p1Sh[1] = bytes32(uint256(2));
-        bytes[] memory p1Pr = new bytes[](2);
-        p1Pr[0] = ""; p1Pr[1] = "";
-        uint8[] memory noCards = new uint8[](0);
-        vm.prank(p1);
-        strictPoker.submitDecrypt(tid, p1Idx, p1Sh, p1Pr, noCards);
+        _dealOn(pk, tid);
+    }
 
-        uint8[] memory p2Idx = new uint8[](2);
-        p2Idx[0] = 0; p2Idx[1] = 1;
-        bytes32[] memory p2Sh = new bytes32[](2);
-        p2Sh[0] = bytes32(uint256(3)); p2Sh[1] = bytes32(uint256(4));
-        bytes[] memory p2Pr = new bytes[](2);
-        p2Pr[0] = ""; p2Pr[1] = "";
-        vm.prank(p2);
-        strictPoker.submitDecrypt(tid, p2Idx, p2Sh, p2Pr, noCards);
+    function _dealOn(PokerTable pk, uint256 tid) internal {
+        uint8[] memory idx1 = new uint8[](2);
+        idx1[0] = 2; idx1[1] = 3;
+        uint8[] memory idx2 = new uint8[](2);
+        idx2[0] = 0; idx2[1] = 1;
+        bytes32[] memory sh = new bytes32[](2);
+        sh[0] = bytes32(uint256(1)); sh[1] = bytes32(uint256(2));
+        bytes[] memory pr = new bytes[](2);
+        pr[0] = ""; pr[1] = "";
+        uint8[] memory nc = new uint8[](0);
 
-        // Play through to showdown
-        vm.prank(p1);
-        strictPoker.act(tid, IPokerTable.Action.CALL, 0);
-        vm.prank(p2);
-        strictPoker.act(tid, IPokerTable.Action.CHECK, 0);
+        vm.prank(p1); pk.submitDecrypt(tid, idx1, sh, pr, nc);
+        vm.prank(p2); pk.submitDecrypt(tid, idx2, sh, pr, nc);
+    }
+
+    function _revealOn(PokerTable pk, uint256 tid, uint8[] memory indices, uint8[] memory cards) internal {
+        bytes32[] memory sh = new bytes32[](indices.length);
+        bytes[] memory pr = new bytes[](indices.length);
+        for (uint256 i = 0; i < indices.length; i++) {
+            sh[i] = bytes32(uint256(i + 10));
+            pr[i] = "";
+        }
+        vm.prank(p1); pk.submitDecrypt(tid, indices, sh, pr, cards);
+        vm.prank(p2); pk.submitDecrypt(tid, indices, sh, pr, cards);
+    }
+
+    function _playToShowdown(PokerTable pk, uint256 tid) internal {
+        // Preflop: call + check
+        vm.prank(p1); pk.act(tid, IPokerTable.Action.CALL, 0);
+        vm.prank(p2); pk.act(tid, IPokerTable.Action.CHECK, 0);
 
         // Flop
         uint8[] memory flopIdx = new uint8[](3);
         flopIdx[0] = 4; flopIdx[1] = 5; flopIdx[2] = 6;
-        bytes32[] memory flopSh = new bytes32[](3);
-        bytes[] memory flopPr = new bytes[](3);
-        for (uint256 i = 0; i < 3; i++) { flopSh[i] = bytes32(uint256(i+10)); flopPr[i] = ""; }
         uint8[] memory flopCards = new uint8[](3);
         flopCards[0] = 10; flopCards[1] = 21; flopCards[2] = 31;
-        vm.prank(p1);
-        strictPoker.submitDecrypt(tid, flopIdx, flopSh, flopPr, flopCards);
-        vm.prank(p2);
-        strictPoker.submitDecrypt(tid, flopIdx, flopSh, flopPr, flopCards);
-
-        vm.prank(p2); strictPoker.act(tid, IPokerTable.Action.CHECK, 0);
-        vm.prank(p1); strictPoker.act(tid, IPokerTable.Action.CHECK, 0);
+        _revealOn(pk, tid, flopIdx, flopCards);
+        vm.prank(p2); pk.act(tid, IPokerTable.Action.CHECK, 0);
+        vm.prank(p1); pk.act(tid, IPokerTable.Action.CHECK, 0);
 
         // Turn
         uint8[] memory turnIdx = new uint8[](1);
         turnIdx[0] = 7;
-        bytes32[] memory turnSh = new bytes32[](1);
-        turnSh[0] = bytes32(uint256(20));
-        bytes[] memory turnPr = new bytes[](1);
-        turnPr[0] = "";
         uint8[] memory turnCards = new uint8[](1);
         turnCards[0] = 43;
-        vm.prank(p1);
-        strictPoker.submitDecrypt(tid, turnIdx, turnSh, turnPr, turnCards);
-        vm.prank(p2);
-        strictPoker.submitDecrypt(tid, turnIdx, turnSh, turnPr, turnCards);
-
-        vm.prank(p2); strictPoker.act(tid, IPokerTable.Action.CHECK, 0);
-        vm.prank(p1); strictPoker.act(tid, IPokerTable.Action.CHECK, 0);
+        _revealOn(pk, tid, turnIdx, turnCards);
+        vm.prank(p2); pk.act(tid, IPokerTable.Action.CHECK, 0);
+        vm.prank(p1); pk.act(tid, IPokerTable.Action.CHECK, 0);
 
         // River
         uint8[] memory riverIdx = new uint8[](1);
         riverIdx[0] = 8;
-        bytes32[] memory riverSh = new bytes32[](1);
-        riverSh[0] = bytes32(uint256(30));
-        bytes[] memory riverPr = new bytes[](1);
-        riverPr[0] = "";
         uint8[] memory riverCards = new uint8[](1);
         riverCards[0] = 0;
-        vm.prank(p1);
-        strictPoker.submitDecrypt(tid, riverIdx, riverSh, riverPr, riverCards);
-        vm.prank(p2);
-        strictPoker.submitDecrypt(tid, riverIdx, riverSh, riverPr, riverCards);
-
-        vm.prank(p2); strictPoker.act(tid, IPokerTable.Action.CHECK, 0);
-        vm.prank(p1); strictPoker.act(tid, IPokerTable.Action.CHECK, 0);
-
-        // Showdown - reveal should fail due to rejecting verifier
-        vm.prank(p1);
-        vm.expectRevert("bad reveal proof");
-        strictPoker.revealHand(tid, "", [uint8(12), uint8(25)]);
+        _revealOn(pk, tid, riverIdx, riverCards);
+        vm.prank(p2); pk.act(tid, IPokerTable.Action.CHECK, 0);
+        vm.prank(p1); pk.act(tid, IPokerTable.Action.CHECK, 0);
     }
 
     // ============================

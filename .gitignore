@@ -35,3 +35,7 @@ broadcast/
 
 # Generated verifier contracts (regenerate with bb)
 contracts/verifiers-generated/
+
+# Verifier build output
+contracts/verifiers-generated/out/
+contracts/verifiers-generated/cache/

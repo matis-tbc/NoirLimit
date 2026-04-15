@@ -282,87 +282,15 @@ contract PokerTable is IPokerTable {
         uint8 pi = _pindex(t);
         require(!t.submitted[pi], "already submitted");
 
-        // Validate parallel arrays
-        require(cardIndices.length > 0, "no cards");
-        require(cardIndices.length == partialDecryptionValues.length, "length mismatch");
-        require(cardIndices.length == proofs.length, "length mismatch");
-
-        // Validate card indices match expected for this phase
-        uint8[] memory expected = _expectedCardIndices(t.state, pi);
-        require(cardIndices.length == expected.length, "wrong number of cards");
-        for (uint256 i = 0; i < expected.length; i++) {
-            require(cardIndices[i] == expected[i], "unexpected card index");
-        }
-
-        // Per-card proof verification
-        for (uint256 i = 0; i < cardIndices.length; i++) {
-            uint8 ci = cardIndices[i];
-
-            bytes32[] memory pub = new bytes32[](5);
-            pub[0] = t.encCardCommitments[ci];
-            pub[1] = t.encCardRandomizers[ci];
-            pub[2] = t.encCardMaskedPayloads[ci];
-            pub[3] = partialDecryptionValues[i];
-            pub[4] = t.playerPublicKeys[pi];
-            require(demoMode || decryptVerifier.verify(proofs[i], pub), "bad decrypt proof");
-
-            t.partialDecryptions[pi][ci] = partialDecryptionValues[i];
-        }
+        _validateAndVerifyDecrypt(t, pi, cardIndices, partialDecryptionValues, proofs);
 
         t.submitted[pi] = true;
 
-        // For community card reveals: first submitter stores values, second must match
-        bool isRevealPhase = t.state == State.FLOP_REVEAL ||
-            t.state == State.TURN_REVEAL || t.state == State.RIVER_REVEAL;
-        if (isRevealPhase && cardValues.length > 0) {
-            if (t.pendingCardValues.length == 0) {
-                for (uint256 i = 0; i < cardValues.length; i++) {
-                    t.pendingCardValues.push(cardValues[i]);
-                }
-            } else {
-                require(cardValues.length == t.pendingCardValues.length, "card count mismatch");
-                for (uint256 i = 0; i < cardValues.length; i++) {
-                    require(cardValues[i] == t.pendingCardValues[i], "card value mismatch between players");
-                }
-            }
-        }
+        _processCardValues(t, cardValues);
 
         emit DecryptSubmitted(tableId, msg.sender, cardIndices, partialDecryptionValues);
 
-        // When both have submitted, advance
-        if (t.submitted[0] && t.submitted[1]) {
-            if (t.state == State.DEALING) {
-                t.state = State.PREFLOP;
-                t.actedSinceLastRaise[0] = false;
-                t.actedSinceLastRaise[1] = false;
-            } else {
-                uint8 expectedCount = t.state == State.FLOP_REVEAL ? 3 : 1;
-                require(t.pendingCardValues.length == expectedCount, "wrong card count");
-                for (uint8 i = 0; i < expectedCount; i++) {
-                    require(t.pendingCardValues[i] < 52, "invalid card");
-                    // Check no duplicate with existing community cards
-                    for (uint8 j = 0; j < t.communityCardCount; j++) {
-                        require(t.pendingCardValues[i] != t.communityCards[j], "duplicate community card");
-                    }
-                    t.communityCards[t.communityCardCount++] = t.pendingCardValues[i];
-                }
-                delete t.pendingCardValues;
-                emit CommunityCardsRevealed(tableId, t.communityCardCount);
-
-                State nextBet;
-                if (t.state == State.FLOP_REVEAL)  nextBet = State.FLOP_BET;
-                else if (t.state == State.TURN_REVEAL) nextBet = State.TURN_BET;
-                else nextBet = State.RIVER_BET;
-
-                _startBettingRound(tableId, nextBet);
-                return;
-            }
-            t.submitted[0] = false;
-            t.submitted[1] = false;
-            _resetDeadline(t);
-        } else {
-            _resetDeadline(t);
-        }
+        _advanceDecryptPhase(tableId, t);
     }
 
     // -------------------------------------------------------
@@ -521,6 +449,92 @@ contract PokerTable is IPokerTable {
             } else {
                 _settleSplit(tableId, State.CANCELLED);
             }
+        }
+    }
+
+    // -------------------------------------------------------
+    //  Internals: decrypt helpers (split to avoid stack-too-deep)
+    // -------------------------------------------------------
+
+    function _validateAndVerifyDecrypt(
+        Table storage t,
+        uint8 pi,
+        uint8[] calldata cardIndices,
+        bytes32[] calldata partialDecryptionValues,
+        bytes[] calldata proofs
+    ) internal {
+        require(cardIndices.length > 0, "no cards");
+        require(cardIndices.length == partialDecryptionValues.length, "length mismatch");
+        require(cardIndices.length == proofs.length, "length mismatch");
+
+        uint8[] memory expected = _expectedCardIndices(t.state, pi);
+        require(cardIndices.length == expected.length, "wrong number of cards");
+        for (uint256 i = 0; i < expected.length; i++) {
+            require(cardIndices[i] == expected[i], "unexpected card index");
+        }
+
+        for (uint256 i = 0; i < cardIndices.length; i++) {
+            uint8 ci = cardIndices[i];
+            bytes32[] memory pub = new bytes32[](5);
+            pub[0] = t.encCardCommitments[ci];
+            pub[1] = t.encCardRandomizers[ci];
+            pub[2] = t.encCardMaskedPayloads[ci];
+            pub[3] = partialDecryptionValues[i];
+            pub[4] = t.playerPublicKeys[pi];
+            require(demoMode || decryptVerifier.verify(proofs[i], pub), "bad decrypt proof");
+            t.partialDecryptions[pi][ci] = partialDecryptionValues[i];
+        }
+    }
+
+    function _processCardValues(Table storage t, uint8[] calldata cardValues) internal {
+        bool isRevealPhase = t.state == State.FLOP_REVEAL ||
+            t.state == State.TURN_REVEAL || t.state == State.RIVER_REVEAL;
+        if (isRevealPhase && cardValues.length > 0) {
+            if (t.pendingCardValues.length == 0) {
+                for (uint256 i = 0; i < cardValues.length; i++) {
+                    t.pendingCardValues.push(cardValues[i]);
+                }
+            } else {
+                require(cardValues.length == t.pendingCardValues.length, "card count mismatch");
+                for (uint256 i = 0; i < cardValues.length; i++) {
+                    require(cardValues[i] == t.pendingCardValues[i], "card value mismatch between players");
+                }
+            }
+        }
+    }
+
+    function _advanceDecryptPhase(uint256 tableId, Table storage t) internal {
+        if (t.submitted[0] && t.submitted[1]) {
+            if (t.state == State.DEALING) {
+                t.state = State.PREFLOP;
+                t.actedSinceLastRaise[0] = false;
+                t.actedSinceLastRaise[1] = false;
+            } else {
+                uint8 expectedCount = t.state == State.FLOP_REVEAL ? 3 : 1;
+                require(t.pendingCardValues.length == expectedCount, "wrong card count");
+                for (uint8 i = 0; i < expectedCount; i++) {
+                    require(t.pendingCardValues[i] < 52, "invalid card");
+                    for (uint8 j = 0; j < t.communityCardCount; j++) {
+                        require(t.pendingCardValues[i] != t.communityCards[j], "duplicate community card");
+                    }
+                    t.communityCards[t.communityCardCount++] = t.pendingCardValues[i];
+                }
+                delete t.pendingCardValues;
+                emit CommunityCardsRevealed(tableId, t.communityCardCount);
+
+                State nextBet;
+                if (t.state == State.FLOP_REVEAL)  nextBet = State.FLOP_BET;
+                else if (t.state == State.TURN_REVEAL) nextBet = State.TURN_BET;
+                else nextBet = State.RIVER_BET;
+
+                _startBettingRound(tableId, nextBet);
+                return;
+            }
+            t.submitted[0] = false;
+            t.submitted[1] = false;
+            _resetDeadline(t);
+        } else {
+            _resetDeadline(t);
         }
     }
 
