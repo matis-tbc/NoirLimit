@@ -1,0 +1,13 @@
+{
+  "chain": "sepolia",
+  "chainId": 11155111,
+  "deployer": "0x2D8f1f9d2117F80677a0F821f05c3b1386ba1087",
+  "demoMode": true,
+  "contracts": {
+    "MockVerifier": "0xAc89d6BF5cA8e8f672bA2D3994f3AE8Ae7083e40",
+    "PokerTable": "0x6Ccaf05ac50eABE2c90b8187b9B6734dCB0E88eC"
+  },
+  "deployedAt": "2026-04-15",
+  "rpc": "https://eth-sepolia.g.alchemy.com/v2/<YOUR_KEY>",
+  "etherscan": "https://sepolia.etherscan.io/address/0x6Ccaf05ac50eABE2c90b8187b9B6734dCB0E88eC"
+}
