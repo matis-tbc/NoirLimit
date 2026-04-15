@@ -1,3 +1,3 @@
-card_commitments = ["", ""]
-revealed_cards = ["", ""]
-commitment_randomness = ["", ""]
+card_commitments = ["0x160793b515d0d1131a79dc717a10b37f7d6036dc9a7766d41e63b5e7f98c6315", "0x167c2ea7d291dd3daef806a5d01512eb0d85eef5edc6f8802b45d4a7f1206529"]
+revealed_cards = ["7", "42"]
+commitment_randomness = ["111", "222"]
