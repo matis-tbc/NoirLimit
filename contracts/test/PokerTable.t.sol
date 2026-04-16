@@ -6,6 +6,7 @@ import "../src/PokerTable.sol";
 import "../src/interfaces/IPokerTable.sol";
 import "../src/mocks/MockVerifier.sol";
 import "../src/mocks/RejectingVerifier.sol";
+import "../src/mocks/AllowListVerifier.sol";
 
 contract PokerTableTest is Test {
     PokerTable poker;
@@ -671,6 +672,67 @@ contract PokerTableTest is Test {
         _expectDecryptRevert(strictPoker, tid);
     }
 
+    function test_decrypt_usesStoredEncryptedCardTupleAsPublicInputs() public {
+        bytes32[] memory expectedOne = new bytes32[](5);
+        expectedOne[0] = bytes32(uint256(102));
+        expectedOne[1] = bytes32(uint256(202));
+        expectedOne[2] = bytes32(uint256(302));
+        expectedOne[3] = bytes32(uint256(0x1111));
+        expectedOne[4] = bytes32(uint256(0xaa));
+
+        bytes32[] memory expectedTwo = new bytes32[](5);
+        expectedTwo[0] = bytes32(uint256(103));
+        expectedTwo[1] = bytes32(uint256(203));
+        expectedTwo[2] = bytes32(uint256(303));
+        expectedTwo[3] = bytes32(uint256(0x2222));
+        expectedTwo[4] = bytes32(uint256(0xaa));
+
+        AllowListVerifier decryptVerifier = new AllowListVerifier(
+            keccak256(abi.encode(expectedOne)),
+            keccak256(abi.encode(expectedTwo))
+        );
+        PokerTable strictPoker = new PokerTable(
+            address(new MockVerifier()),
+            address(decryptVerifier),
+            address(new MockVerifier()),
+            false
+        );
+
+        vm.deal(p1, 10 ether);
+        vm.deal(p2, 10 ether);
+
+        vm.prank(p1);
+        uint256 tid = strictPoker.createTable{value: BUY_IN}(BIG_BLIND);
+        vm.prank(p2);
+        strictPoker.joinTable{value: BUY_IN}(tid);
+
+        vm.prank(p1);
+        strictPoker.registerPublicKey(tid, bytes32(uint256(0xaa)));
+        vm.prank(p2);
+        strictPoker.registerPublicKey(tid, bytes32(uint256(0xbb)));
+
+        vm.prank(p1);
+        strictPoker.submitShuffle(tid, "", bytes32(uint256(1)), _emptyDeck(), _emptyDeck(), _emptyDeck());
+
+        (bytes32[52] memory c, bytes32[52] memory r, bytes32[52] memory p) = _sampleDeck();
+        vm.prank(p2);
+        strictPoker.submitShuffle(tid, "", bytes32(uint256(2)), c, r, p);
+
+        uint8[] memory indices = new uint8[](2);
+        indices[0] = 2;
+        indices[1] = 3;
+        bytes32[] memory shares = new bytes32[](2);
+        shares[0] = bytes32(uint256(0x1111));
+        shares[1] = bytes32(uint256(0x2222));
+        bytes[] memory proofs = new bytes[](2);
+        proofs[0] = "";
+        proofs[1] = "";
+        uint8[] memory noCards = new uint8[](0);
+
+        vm.prank(p1);
+        strictPoker.submitDecrypt(tid, indices, shares, proofs, noCards);
+    }
+
     function _expectDecryptRevert(PokerTable pk, uint256 tid) internal {
         uint8[] memory indices = new uint8[](2);
         indices[0] = 2; indices[1] = 3;
@@ -970,6 +1032,28 @@ contract PokerTableTest is Test {
         poker.submitDecrypt(tid, flopIdx, shares, proofs, flop2);
     }
 
+    function test_dealPhase_cardValues_revert() public {
+        uint256 tid = _createAndJoin();
+        _doShuffles(tid);
+
+        uint8[] memory indices = new uint8[](2);
+        indices[0] = 2;
+        indices[1] = 3;
+        bytes32[] memory shares = new bytes32[](2);
+        shares[0] = bytes32(uint256(1));
+        shares[1] = bytes32(uint256(2));
+        bytes[] memory proofs = new bytes[](2);
+        proofs[0] = "";
+        proofs[1] = "";
+        uint8[] memory leakedCards = new uint8[](2);
+        leakedCards[0] = 10;
+        leakedCards[1] = 11;
+
+        vm.prank(p1);
+        vm.expectRevert("deal phase cardValues must be empty");
+        poker.submitDecrypt(tid, indices, shares, proofs, leakedCards);
+    }
+
     // ============================
     //  New: per-card decrypt validation
     // ============================
@@ -1045,6 +1129,42 @@ contract PokerTableTest is Test {
         // P1 decrypted cards [2,3] with shares 0x1111, 0x2222
         bytes32 share = poker.getPartialDecryption(tid, 2, 0);
         assertEq(share, bytes32(uint256(0x1111)));
+    }
+
+    function test_getPartialDecryption_isolatedByPlayerAndCard() public {
+        uint256 tid = _createAndJoin();
+        _doShuffles(tid);
+        _doDeal(tid);
+
+        assertEq(poker.getPartialDecryption(tid, 2, 0), bytes32(uint256(0x1111)));
+        assertEq(poker.getPartialDecryption(tid, 3, 0), bytes32(uint256(0x2222)));
+        assertEq(poker.getPartialDecryption(tid, 0, 1), bytes32(uint256(0x3333)));
+        assertEq(poker.getPartialDecryption(tid, 1, 1), bytes32(uint256(0x4444)));
+        assertEq(poker.getPartialDecryption(tid, 0, 0), bytes32(0));
+        assertEq(poker.getPartialDecryption(tid, 2, 1), bytes32(0));
+    }
+
+    function test_getPartialDecryption_afterCommunityReveal_keepsPerCardShares() public {
+        uint256 tid = _createAndJoin();
+        _toPreflop(tid);
+
+        vm.prank(p1);
+        poker.act(tid, IPokerTable.Action.CALL, 0);
+        vm.prank(p2);
+        poker.act(tid, IPokerTable.Action.CHECK, 0);
+
+        uint8[] memory flop = new uint8[](3);
+        flop[0] = 10;
+        flop[1] = 21;
+        flop[2] = 31;
+        _doReveal(tid, flop);
+
+        assertEq(poker.getPartialDecryption(tid, 4, 0), bytes32(uint256(0xaaaa)));
+        assertEq(poker.getPartialDecryption(tid, 5, 0), bytes32(uint256(0xaaab)));
+        assertEq(poker.getPartialDecryption(tid, 6, 0), bytes32(uint256(0xaaac)));
+        assertEq(poker.getPartialDecryption(tid, 4, 1), bytes32(uint256(0xaaaa)));
+        assertEq(poker.getPartialDecryption(tid, 5, 1), bytes32(uint256(0xaaab)));
+        assertEq(poker.getPartialDecryption(tid, 6, 1), bytes32(uint256(0xaaac)));
     }
 
     function test_getWinner() public {
