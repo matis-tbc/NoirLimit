@@ -487,6 +487,11 @@ contract PokerTable is IPokerTable {
     }
 
     function _processCardValues(Table storage t, uint8[] calldata cardValues) internal {
+        if (t.state == State.DEALING) {
+            require(cardValues.length == 0, "deal phase cardValues must be empty");
+            return;
+        }
+
         bool isRevealPhase = t.state == State.FLOP_REVEAL ||
             t.state == State.TURN_REVEAL || t.state == State.RIVER_REVEAL;
         if (isRevealPhase && cardValues.length > 0) {

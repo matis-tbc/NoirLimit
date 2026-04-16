@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import "forge-std/Script.sol";
 import "../src/PokerTable.sol";
+import "../src/SpectatorMarket.sol";
 import "../src/mocks/MockVerifier.sol";
 
 contract Deploy is Script {
@@ -37,7 +38,9 @@ contract Deploy is Script {
         }
 
         PokerTable poker = new PokerTable(shuffleVerifier, decryptVerifier, revealVerifier, demo);
+        SpectatorMarket spectatorMarket = new SpectatorMarket(address(poker));
         console.log("PokerTable:", address(poker));
+        console.log("SpectatorMarket:", address(spectatorMarket));
         console.log("Demo mode:", demo);
 
         vm.stopBroadcast();
