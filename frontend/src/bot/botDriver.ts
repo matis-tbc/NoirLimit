@@ -95,12 +95,17 @@ async function send(
       // post-timeout, the worst case is a duplicate which the contract
       // rejects (already-submitted, not-your-turn, etc.).
       throw new Error("receipt timeout");
-    } else {
-      zkLog.update(hash, {
-        status: result.status === "success" ? "confirmed" : "reverted",
-        gasUsed: result.gasUsed,
-        blockNumber: result.blockNumber,
-      });
+    }
+    zkLog.update(hash, {
+      status: result.status === "success" ? "confirmed" : "reverted",
+      gasUsed: result.gasUsed,
+      blockNumber: result.blockNumber,
+    });
+    if (result.status !== "success") {
+      // viem's waitForTransactionReceipt does NOT throw on revert; it returns
+      // a receipt with status="reverted". Throw ourselves so the caller's
+      // try/catch (e.g. CALL fallback to CHECK in the betting branch) fires.
+      throw new Error(`bot tx reverted: ${fn}`);
     }
   } catch (err: any) {
     zkLog.update(hash, { status: "reverted", revertReason: err?.shortMessage || err?.message });
