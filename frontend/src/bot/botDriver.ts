@@ -2,6 +2,7 @@ import { isAddressEqual, type Address, type Hex } from "viem";
 import { POKER_TABLE_ABI, POKER_TABLE_ADDRESS } from "../utils/contracts";
 import { Phase, ActionCode } from "../utils/phase";
 import { zkLog } from "../utils/zkLog";
+import { gasFor } from "../utils/gas";
 import {
   publicKeyFor,
   shuffleP1Payload,
@@ -64,6 +65,7 @@ async function send(
     functionName: fn,
     args,
     value,
+    gas: gasFor(fn),
   } as any)) as Hex;
   zkLog.push({
     tableId: ctx.tableId,
@@ -74,12 +76,32 @@ async function send(
     status: "pending",
   });
   try {
-    const receipt = await bot.publicClient.waitForTransactionReceipt({ hash });
-    zkLog.update(hash, {
-      status: receipt.status === "success" ? "confirmed" : "reverted",
-      gasUsed: receipt.gasUsed,
-      blockNumber: receipt.blockNumber,
-    });
+    // The bot AWAITS the receipt to serialize its tick loop, but we cap the
+    // wait so a stalled RPC doesn't deadlock the bot forever.
+    const timeout = new Promise<"timeout">((resolve) =>
+      setTimeout(() => resolve("timeout"), 90_000)
+    );
+    const result = await Promise.race([
+      bot.publicClient.waitForTransactionReceipt({ hash }),
+      timeout,
+    ]);
+    if (result === "timeout") {
+      zkLog.update(hash, {
+        status: "unknown",
+        revertReason: "bot receipt fetch timed out (90s)",
+      });
+      // Surface as an error so useDemoBot's retry path clears the dedup ref
+      // and re-evaluates phase state next tick. If the original tx lands
+      // post-timeout, the worst case is a duplicate which the contract
+      // rejects (already-submitted, not-your-turn, etc.).
+      throw new Error("receipt timeout");
+    } else {
+      zkLog.update(hash, {
+        status: result.status === "success" ? "confirmed" : "reverted",
+        gasUsed: result.gasUsed,
+        blockNumber: result.blockNumber,
+      });
+    }
   } catch (err: any) {
     zkLog.update(hash, { status: "reverted", revertReason: err?.shortMessage || err?.message });
     throw err;
@@ -136,12 +158,22 @@ export async function botTick({
     lastSubmitted.current = key;
     try {
       await send(bot, "registerPublicKey", [tableId, publicKeyFor(seat + 1)], ctx);
-    } catch (err) {
-      // Bot was already registered on-chain (e.g. after a refresh). Contract is
-      // source of truth; mark registered and let the next tick pick up the phase.
-      console.warn("[bot] registerPublicKey reverted, assuming already registered", err);
+      publicKeyRegistered.current = true;
+    } catch (err: any) {
+      // Only treat as "already registered" if the revert message says so.
+      // Other failures (network, gas, contract paused) bubble up so the next
+      // tick retries, preventing a permanent wedge.
+      const msg = String(
+        err?.shortMessage || err?.details || err?.message || ""
+      ).toLowerCase();
+      if (msg.includes("already registered")) {
+        publicKeyRegistered.current = true;
+      } else {
+        // Reset dedup so the next tick can retry this exact step.
+        lastSubmitted.current = null;
+        throw err;
+      }
     }
-    publicKeyRegistered.current = true;
     return { acted: true, phase };
   }
 

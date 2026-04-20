@@ -2,8 +2,9 @@ import { useEffect, useRef } from "react";
 import { useWriteContract, usePublicClient } from "wagmi";
 import type { Hex } from "viem";
 import { POKER_TABLE_ABI, POKER_TABLE_ADDRESS } from "../utils/contracts";
-import { Phase, isAutoPhase } from "../utils/phase";
+import { Phase, isAutoPhase, isTerminal } from "../utils/phase";
 import { zkLog } from "../utils/zkLog";
+import { gasFor } from "../utils/gas";
 import {
   publicKeyFor,
   shuffleP1Payload,
@@ -49,7 +50,8 @@ export function useAutoSubmit({
       abi: POKER_TABLE_ABI,
       functionName: functionName as any,
       args: args as any,
-    })) as Hex;
+      gas: gasFor(functionName),
+    } as any)) as Hex;
     zkLog.push({
       tableId: ctx.tableId,
       phase: ctx.phase,
@@ -59,15 +61,30 @@ export function useAutoSubmit({
       status: "pending",
     });
     if (publicClient) {
-      publicClient
-        .waitForTransactionReceipt({ hash })
-        .then((receipt) =>
-          zkLog.update(hash, {
-            status: receipt.status === "success" ? "confirmed" : "reverted",
-            gasUsed: receipt.gasUsed,
-            blockNumber: receipt.blockNumber,
-          })
-        )
+      // Race the receipt fetch against a 60s timeout so a stalled RPC does
+      // not leave the chip pulsing forever. If timeout wins, mark "unknown"
+      // so the user knows to check Etherscan manually.
+      const timeout = new Promise<"timeout">((resolve) =>
+        setTimeout(() => resolve("timeout"), 60_000)
+      );
+      Promise.race([
+        publicClient.waitForTransactionReceipt({ hash }),
+        timeout,
+      ])
+        .then((result) => {
+          if (result === "timeout") {
+            zkLog.update(hash, {
+              status: "unknown",
+              revertReason: "receipt fetch timed out (60s) - check Etherscan",
+            });
+          } else {
+            zkLog.update(hash, {
+              status: result.status === "success" ? "confirmed" : "reverted",
+              gasUsed: result.gasUsed,
+              blockNumber: result.blockNumber,
+            });
+          }
+        })
         .catch((err) =>
           zkLog.update(hash, { status: "reverted", revertReason: err?.shortMessage || err?.message })
         );
