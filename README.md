@@ -1,6 +1,12 @@
 # NoirLimit
 
-Zero-knowledge poker on EVM. Heads-up No-Limit Texas Hold'em with private cards secured by Noir ZK proofs.
+Zero-knowledge poker on Ethereum. Heads-up Texas Hold'em where cards are
+encrypted on-chain, dealt via partial decryption shares, and verified with
+Noir ZK proofs. Includes a spectator wagering market so anyone can place bets
+on a live hand.
+
+> **Demo only.** Live on Sepolia testnet in `demoMode = true` with a mock
+> verifier. See [SECURITY.md](./SECURITY.md) for the full posture.
 
 ## Team
 
@@ -10,96 +16,127 @@ Zero-knowledge poker on EVM. Heads-up No-Limit Texas Hold'em with private cards 
 
 ## Status
 
-MVP in progress. Core contracts and circuits are built and tested. Frontend not started.
+| Layer | State |
+|---|---|
+| Noir circuits (shuffle, decrypt, reveal) | Built, 17 tests passing |
+| Solidity contracts (PokerTable, SpectatorMarket, HandEvaluator) | Built, 65+ tests passing |
+| Sepolia deployment of PokerTable | Live in demoMode |
+| Sepolia deployment of SpectatorMarket | Pending |
+| Frontend (Vite + React + wagmi + RainbowKit) | Built, runs locally |
+| In-browser bot opponent | Built (ephemeral wallet, auto-plays) |
+| Spectator wagering UI | Built (gracefully degrades until SpectatorMarket deploys) |
+| ZK reveal animation | Built (three-beat: your view → on-chain → opponent's view) |
+| External audit | Not done |
 
-**What works:**
-- PokerTable.sol: complete state machine (14 states), betting, timeouts, payouts, hand evaluation
-- Per-card encrypted deck storage with threshold decryption (protocol-correct per zkShuffle/Barnett-Smart)
-- 3 Noir circuits (shuffle, decrypt, reveal) using Pedersen hash at 52-card scale
-- Generated Solidity verifier contracts from compiled circuits
-- Demo mode flag for testnet deployment (skips proof verification)
-- Deploy script + scripted end-to-end demo hand
-- 65 contract tests, 17 circuit tests (all passing)
+**Deployed addresses (Sepolia):**
 
-**What's next:**
-- SpectatorMarket.sol implementation (spectator wagering)
-- Frontend (wallet connect, table UI, in-browser proof generation)
-- Testnet deployment to Sepolia
+- `PokerTable.sol` &mdash; [`0x6Ccaf05ac50eABE2c90b8187b9B6734dCB0E88eC`](https://sepolia.etherscan.io/address/0x6Ccaf05ac50eABE2c90b8187b9B6734dCB0E88eC)
+- `MockVerifier.sol` &mdash; [`0xAc89d6BF5cA8e8f672bA2D3994f3AE8Ae7083e40`](https://sepolia.etherscan.io/address/0xAc89d6BF5cA8e8f672bA2D3994f3AE8Ae7083e40)
 
-## Project Structure
+## Run locally
+
+```bash
+git clone https://github.com/matis-tbc/NoirLimit.git
+cd NoirLimit/frontend
+cp .env.example .env.local       # add your VITE_SEPOLIA_RPC (Alchemy, Infura, etc.)
+npm install
+npm run dev                      # opens http://localhost:51852
+```
+
+A full hand against the in-browser bot costs ~0.005 Sepolia ETH. Hit a
+[Sepolia faucet](https://www.alchemy.com/faucets/ethereum-sepolia) if your
+wallet is dry. See [`frontend/README.md`](./frontend/README.md) for more.
+
+## How it works
+
+Each hand is a fixed sequence of on-chain transactions across these phases:
+
+```
+WAITING -> SHUFFLE_P1 -> SHUFFLE_P2 -> DEALING ->
+PREFLOP -> FLOP_REVEAL -> FLOP_BET ->
+TURN_REVEAL -> TURN_BET -> RIVER_REVEAL -> RIVER_BET ->
+SHOWDOWN -> SETTLED
+```
+
+1. Both players register a public key.
+2. Each player re-encrypts and permutes the deck, submitting a ZK proof.
+3. Each player publishes partial decryption shares for the OPPONENT's hole
+   cards; the owner combines shares with their secret to read their own cards.
+4. Standard poker betting rounds. Community cards revealed by joint partial
+   decryption.
+5. At showdown, each player reveals their hole cards bound to the original
+   commitments. `HandEvaluator` picks the winner.
+
+Every phase has a 120-second deadline. Stalling players forfeit via
+`claimTimeout`.
+
+## Project structure
 
 ```
 NoirLimit/
 ├── circuits/                # Noir ZK circuits
-│   ├── common/              # Shared crypto primitives (Pedersen hash, card encryption)
-│   ├── shuffle/             # Encrypt-shuffle proof (re-encryption permutation)
-│   ├── decrypt/             # Threshold decryption proof (partial key share)
-│   └── reveal/              # Showdown card reveal proof (commitment opening)
+│   ├── common/              # Pedersen hash, card encryption primitives
+│   ├── shuffle/             # 103,756-gate re-encryption shuffle proof
+│   ├── decrypt/             # Partial decryption proof
+│   └── reveal/              # Showdown card opening proof
 ├── contracts/               # Solidity (Foundry)
 │   ├── src/
-│   │   ├── PokerTable.sol   # Game state machine + betting + settlement
-│   │   ├── HandEvaluator.sol # Poker hand ranking (best 5 of 7)
-│   │   ├── interfaces/      # IPokerTable, ISpectatorMarket, IVerifier
-│   │   └── mocks/           # MockVerifier, RejectingVerifier for tests
-│   ├── test/                # Foundry test suite (65 tests)
-│   ├── script/              # Deploy.s.sol, DemoHand.s.sol
-│   └── verifiers-generated/ # Solidity verifiers generated from circuits via bb
-├── frontend/                # React app (not yet implemented)
-└── REVIEWED_PLAN.md         # Protocol design document
+│   │   ├── PokerTable.sol       # Game state machine + betting + settlement
+│   │   ├── SpectatorMarket.sol  # Pari-mutuel wagers on hand outcome
+│   │   ├── HandEvaluator.sol    # Best 5-of-7 hand ranking
+│   │   └── interfaces/, mocks/
+│   ├── test/                # Foundry test suite
+│   ├── script/              # Deploy scripts
+│   └── deployments/         # Per-chain address registry
+├── frontend/                # Vite + React + wagmi + RainbowKit
+│   ├── src/
+│   │   ├── pages/           # Lobby, Table, Spectator
+│   │   ├── components/      # Card, Seat, ActionBar, ZKReveal, OddsBar, etc.
+│   │   ├── hooks/           # usePokerTable, useGameActions, useAutoSubmit, useDemoBot
+│   │   ├── bot/             # Ephemeral-key auto-opponent
+│   │   └── utils/           # zkLog (tx hash store), demoPayloads, deal
+│   └── README.md            # Frontend run + architecture details
+├── docs/archive/            # Original planning + protocol design docs
+└── SECURITY.md              # Demo posture + threat model
 ```
 
-## Tech Stack
+## Tech stack
 
-- **ZK Proofs**: Noir (Pedersen hash, compiled with nargo 0.39.0)
-- **Smart Contracts**: Solidity 0.8.24, Foundry
-- **Proof Backend**: Barretenberg (bb 0.63.1 for verifier generation)
-- **Frontend** (planned): React, Vite, wagmi, viem, @noir-lang/noir_js
+- **ZK proofs**: Noir, Pedersen hash, compiled with `nargo`
+- **Smart contracts**: Solidity 0.8.24, Foundry
+- **Proof backend**: Barretenberg (`bb` for verifier generation)
+- **Frontend**: React 18, Vite, TypeScript, wagmi v2, viem, RainbowKit, Tailwind
 
-## Getting Started
-
-### Prerequisites
-
-- [Nargo](https://noir-lang.org/docs/getting_started/installation/) (install via `noirup`)
-- [Foundry](https://book.getfoundry.sh/) (install via `foundryup`)
-
-### Build and Test
+## Build and test
 
 ```bash
-# Compile and test circuits
 cd circuits && nargo test
-
-# Compile and test contracts
 cd contracts && forge test
+cd frontend && npm install && npm run build
 ```
 
-### Circuit Benchmarks (52-card deck, Pedersen hash)
+## Circuit benchmarks (52-card deck, Pedersen hash)
 
-| Circuit | ACIR Opcodes | Gates | Description |
-|---------|-------------|-------|-------------|
+| Circuit | ACIR Opcodes | Gates | Purpose |
+|---------|-------------:|------:|---------|
 | shuffle | 22,977 | 103,756 | Re-encryption shuffle proof |
-| decrypt | 224 | 3,351 | Partial decryption proof |
-| reveal | 130 | 3,099 | Card commitment opening |
+| decrypt |    224 |  3,351 | Partial decryption proof |
+| reveal  |    130 |  3,099 | Card commitment opening |
 
-## How It Works
+## Known limitations
 
-1. **Table creation**: Player 1 creates a table with a buy-in. Player 2 joins and matches.
-2. **Key registration**: Both players register public keys for threshold decryption.
-3. **Shuffle**: Each player re-encrypts and permutes the deck, submitting a ZK proof that the shuffle is valid.
-4. **Deal**: Both players submit partial decryption shares for hole cards, proven correct via ZK.
-5. **Betting**: Standard poker betting rounds (pre-flop, flop, turn, river). All on-chain.
-6. **Community reveals**: Both players submit matching decrypted community card values.
-7. **Showdown**: Players reveal hole cards with ZK proofs binding to their dealt commitments.
-8. **Settlement**: HandEvaluator determines the winner. Contract distributes the pot.
-
-Timeouts at every phase. If a player stalls, the opponent can claim the pot after 120 seconds.
-
-## Known Limitations
-
-- 2-player heads-up only (multi-player requires N-party threshold decryption)
-- Decrypt proof public inputs are partially placeholder (protocol design needed for per-card encrypted state tracking)
-- No frontend yet
-- Gas costs untested on L2 (verifier contracts are large)
+- **Demo mode bypasses all proof verification.** The deployed `MockVerifier`
+  accepts empty bytes. See [SECURITY.md](./SECURITY.md).
+- **Hole cards are derivable from public on-chain state** in the demo build
+  (deterministic seed from `tableId + player addresses`). Acceptable for a
+  demo, not for real value.
+- **Bot wallet key lives in browser localStorage.** Sweep it back to your
+  host wallet before clearing storage.
+- **2-player heads-up only.** N-party threshold decryption is out of scope.
+- **No external audit.** 65+ contract tests are the only correctness gate.
+- **Verifier contracts are gas-heavy** and may exceed EIP-170 size limits at
+  L1; L2 deployment untested.
 
 ## License
 
-MIT
+MIT (intent; LICENSE file pending).
