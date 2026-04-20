@@ -38,7 +38,7 @@ RIVER_REVEAL -> RIVER_BET -> SHOWDOWN -> SETTLED
 
 Each phase has a 120-second timeout. Stalling players forfeit.
 
-Three ZK verifier contracts (shuffle, decrypt, reveal) are injected via constructor. Generated verifiers are gitignored; regenerate with `bb` (see PLAN.md).
+Three ZK verifier contracts (shuffle, decrypt, reveal) are injected via constructor. Generated verifiers are gitignored; regenerate with `bb` (see `docs/archive/PLAN-original.md`).
 
 `submitDecrypt` is intentionally per-card for this MVP:
 - it verifies each proof against the stored encrypted tuple for that card index

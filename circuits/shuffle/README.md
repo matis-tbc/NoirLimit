@@ -1,6 +1,6 @@
 # Shuffle Circuit
 
-Week 4 implements the shuffle circuit as a staged **encrypt-shuffle prototype** aligned with `REVIEWED_PLAN.md`, not the older permutation-only design.
+Week 4 implements the shuffle circuit as a staged **encrypt-shuffle prototype** aligned with `docs/archive/REVIEWED_PLAN.md`, not the older permutation-only design.
 
 ## What This Proves
 

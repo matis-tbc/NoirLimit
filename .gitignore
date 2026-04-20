@@ -9,6 +9,10 @@ cache/
 contracts/out/
 contracts/cache/
 
+# TypeScript incremental
+*.tsbuildinfo
+frontend/tsconfig.tsbuildinfo
+
 # Noir artifacts
 circuits/target/
 circuits/*/target/

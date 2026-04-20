@@ -1,6 +1,6 @@
 # Circuits
 
-Noir zero-knowledge circuits for private card handling in NoirLimit. The repo is still early, so `REVIEWED_PLAN.md` is the protocol source of truth when older README text conflicts with current implementation.
+Noir zero-knowledge circuits for private card handling in NoirLimit. The repo is still early, so `docs/archive/REVIEWED_PLAN.md` is the protocol source of truth when older README text conflicts with current implementation.
 
 ## Current workspace
 
@@ -60,7 +60,7 @@ The current hash and ciphertext construction are poseidon-style placeholders des
 
 ## Week 4 decrypt implementation
 
-`decrypt/` implements the new partial-decryption proof called for in `REVIEWED_PLAN.md`:
+`decrypt/` implements the new partial-decryption proof called for in `docs/archive/REVIEWED_PLAN.md`:
 
 - Public inputs:
   - `encrypted_card_commitment`
