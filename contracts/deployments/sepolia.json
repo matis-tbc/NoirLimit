@@ -5,9 +5,15 @@
   "demoMode": true,
   "contracts": {
     "MockVerifier": "0xAc89d6BF5cA8e8f672bA2D3994f3AE8Ae7083e40",
-    "PokerTable": "0x6Ccaf05ac50eABE2c90b8187b9B6734dCB0E88eC"
+    "PokerTable": "0x6Ccaf05ac50eABE2c90b8187b9B6734dCB0E88eC",
+    "SpectatorMarket": "0x666898f7706ddd0193012aEc50EAF7D2E9FCbAf0"
   },
   "deployedAt": "2026-04-15",
+  "spectatorDeployedAt": "2026-04-19",
+  "spectatorDeployer": "0xDe64059f1B6a37413f22D8Af0a8ABb754C0c531E",
   "rpc": "https://eth-sepolia.g.alchemy.com/v2/<YOUR_KEY>",
-  "etherscan": "https://sepolia.etherscan.io/address/0x6Ccaf05ac50eABE2c90b8187b9B6734dCB0E88eC"
+  "etherscan": {
+    "PokerTable": "https://sepolia.etherscan.io/address/0x6Ccaf05ac50eABE2c90b8187b9B6734dCB0E88eC",
+    "SpectatorMarket": "https://sepolia.etherscan.io/address/0x666898f7706ddd0193012aEc50EAF7D2E9FCbAf0"
+  }
 }
