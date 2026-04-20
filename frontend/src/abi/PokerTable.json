@@ -1,0 +1,671 @@
+{
+  "abi": [
+    {
+      "type": "constructor",
+      "inputs": [
+        {
+          "name": "_shuffle",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "_decrypt",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "_reveal",
+          "type": "address",
+          "internalType": "address"
+        },
+        {
+          "name": "_demoMode",
+          "type": "bool",
+          "internalType": "bool"
+        }
+      ],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "act",
+      "inputs": [
+        {
+          "name": "tableId",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "action",
+          "type": "uint8",
+          "internalType": "enum IPokerTable.Action"
+        },
+        {
+          "name": "raiseAmount",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "actionTimeout",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "cancelTable",
+      "inputs": [
+        {
+          "name": "tableId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "claimTimeout",
+      "inputs": [
+        {
+          "name": "tableId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "createTable",
+      "inputs": [
+        {
+          "name": "bigBlind",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "tableId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "payable"
+    },
+    {
+      "type": "function",
+      "name": "decryptVerifier",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "address",
+          "internalType": "contract IVerifier"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "demoMode",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "bool",
+          "internalType": "bool"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "getEncryptedCard",
+      "inputs": [
+        {
+          "name": "tid",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "cardIndex",
+          "type": "uint8",
+          "internalType": "uint8"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "commitment",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        },
+        {
+          "name": "randomizer",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        },
+        {
+          "name": "maskedPayload",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "getPartialDecryption",
+      "inputs": [
+        {
+          "name": "tid",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "cardIndex",
+          "type": "uint8",
+          "internalType": "uint8"
+        },
+        {
+          "name": "playerIndex",
+          "type": "uint8",
+          "internalType": "uint8"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "share",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "getTable",
+      "inputs": [
+        {
+          "name": "tid",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "players",
+          "type": "address[2]",
+          "internalType": "address[2]"
+        },
+        {
+          "name": "stacks",
+          "type": "uint256[2]",
+          "internalType": "uint256[2]"
+        },
+        {
+          "name": "pot",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "state",
+          "type": "uint8",
+          "internalType": "enum IPokerTable.State"
+        },
+        {
+          "name": "communityCardCount",
+          "type": "uint8",
+          "internalType": "uint8"
+        },
+        {
+          "name": "turn",
+          "type": "uint8",
+          "internalType": "uint8"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "getWinner",
+      "inputs": [
+        {
+          "name": "tid",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "address",
+          "internalType": "address"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "joinTable",
+      "inputs": [
+        {
+          "name": "tableId",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "payable"
+    },
+    {
+      "type": "function",
+      "name": "nextTableId",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "uint256",
+          "internalType": "uint256"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "registerPublicKey",
+      "inputs": [
+        {
+          "name": "tableId",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "publicKey",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "revealHand",
+      "inputs": [
+        {
+          "name": "tableId",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "proof",
+          "type": "bytes",
+          "internalType": "bytes"
+        },
+        {
+          "name": "cards",
+          "type": "uint8[2]",
+          "internalType": "uint8[2]"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "revealVerifier",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "address",
+          "internalType": "contract IVerifier"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "shuffleVerifier",
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "",
+          "type": "address",
+          "internalType": "contract IVerifier"
+        }
+      ],
+      "stateMutability": "view"
+    },
+    {
+      "type": "function",
+      "name": "submitDecrypt",
+      "inputs": [
+        {
+          "name": "tableId",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "cardIndices",
+          "type": "uint8[]",
+          "internalType": "uint8[]"
+        },
+        {
+          "name": "partialDecryptionValues",
+          "type": "bytes32[]",
+          "internalType": "bytes32[]"
+        },
+        {
+          "name": "proofs",
+          "type": "bytes[]",
+          "internalType": "bytes[]"
+        },
+        {
+          "name": "cardValues",
+          "type": "uint8[]",
+          "internalType": "uint8[]"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "function",
+      "name": "submitShuffle",
+      "inputs": [
+        {
+          "name": "tableId",
+          "type": "uint256",
+          "internalType": "uint256"
+        },
+        {
+          "name": "proof",
+          "type": "bytes",
+          "internalType": "bytes"
+        },
+        {
+          "name": "newDeckCommitment",
+          "type": "bytes32",
+          "internalType": "bytes32"
+        },
+        {
+          "name": "cardCommitments",
+          "type": "bytes32[52]",
+          "internalType": "bytes32[52]"
+        },
+        {
+          "name": "cardRandomizers",
+          "type": "bytes32[52]",
+          "internalType": "bytes32[52]"
+        },
+        {
+          "name": "cardMaskedPayloads",
+          "type": "bytes32[52]",
+          "internalType": "bytes32[52]"
+        }
+      ],
+      "outputs": [],
+      "stateMutability": "nonpayable"
+    },
+    {
+      "type": "event",
+      "name": "ActionTaken",
+      "inputs": [
+        {
+          "name": "tableId",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "player",
+          "type": "address",
+          "indexed": false,
+          "internalType": "address"
+        },
+        {
+          "name": "action",
+          "type": "uint8",
+          "indexed": false,
+          "internalType": "uint8"
+        },
+        {
+          "name": "amount",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "CommunityCardsRevealed",
+      "inputs": [
+        {
+          "name": "tableId",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "newCardCount",
+          "type": "uint8",
+          "indexed": false,
+          "internalType": "uint8"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "DecryptSubmitted",
+      "inputs": [
+        {
+          "name": "tableId",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "player",
+          "type": "address",
+          "indexed": false,
+          "internalType": "address"
+        },
+        {
+          "name": "cardIndices",
+          "type": "uint8[]",
+          "indexed": false,
+          "internalType": "uint8[]"
+        },
+        {
+          "name": "partialDecryptionValues",
+          "type": "bytes32[]",
+          "indexed": false,
+          "internalType": "bytes32[]"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "HandRevealed",
+      "inputs": [
+        {
+          "name": "tableId",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "player",
+          "type": "address",
+          "indexed": false,
+          "internalType": "address"
+        },
+        {
+          "name": "card0",
+          "type": "uint8",
+          "indexed": false,
+          "internalType": "uint8"
+        },
+        {
+          "name": "card1",
+          "type": "uint8",
+          "indexed": false,
+          "internalType": "uint8"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "HandSettled",
+      "inputs": [
+        {
+          "name": "tableId",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "winner",
+          "type": "address",
+          "indexed": false,
+          "internalType": "address"
+        },
+        {
+          "name": "pot",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "PlayerJoined",
+      "inputs": [
+        {
+          "name": "tableId",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "player",
+          "type": "address",
+          "indexed": false,
+          "internalType": "address"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "ShuffleSubmitted",
+      "inputs": [
+        {
+          "name": "tableId",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "player",
+          "type": "address",
+          "indexed": false,
+          "internalType": "address"
+        },
+        {
+          "name": "newDeckCommitment",
+          "type": "bytes32",
+          "indexed": false,
+          "internalType": "bytes32"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "TableCancelled",
+      "inputs": [
+        {
+          "name": "tableId",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "TableCreated",
+      "inputs": [
+        {
+          "name": "tableId",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "creator",
+          "type": "address",
+          "indexed": false,
+          "internalType": "address"
+        },
+        {
+          "name": "buyIn",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        },
+        {
+          "name": "bigBlind",
+          "type": "uint256",
+          "indexed": false,
+          "internalType": "uint256"
+        }
+      ],
+      "anonymous": false
+    },
+    {
+      "type": "event",
+      "name": "TimeoutClaimed",
+      "inputs": [
+        {
+          "name": "tableId",
+          "type": "uint256",
+          "indexed": true,
+          "internalType": "uint256"
+        },
+        {
+          "name": "beneficiary",
+          "type": "address",
+          "indexed": false,
+          "internalType": "address"
+        }
+      ],
+      "anonymous": false
+    }
+  ]
+}
