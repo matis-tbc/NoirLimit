@@ -15,7 +15,10 @@ import { DebugPanel } from "../components/DebugPanel";
 import { CheatButton } from "../components/CheatButton";
 import { WinnerBanner } from "../components/WinnerBanner";
 import { TimeoutButton } from "../components/TimeoutButton";
-import { Phase, PHASE_LABELS, isAutoPhase, isBettingPhase } from "../utils/phase";
+import { PhaseTimer } from "../components/PhaseTimer";
+import { TerminalPanel } from "../components/TerminalPanel";
+import { useHandSettled } from "../hooks/useHandSettled";
+import { Phase, PHASE_LABELS, isAutoPhase, isBettingPhase, isTerminal } from "../utils/phase";
 import { dealHoleCards } from "../utils/deal";
 
 export default function Table() {
@@ -27,12 +30,19 @@ export default function Table() {
   const logs = usePokerEvents(tableId);
   const actions = useGameActions();
 
+  const phaseFromTable = table?.phase ?? -1;
+  const terminal = isTerminal(phaseFromTable);
+
   // Bot mode is opt-in via ?bot=1 (set by the Lobby when creating in bot mode).
   const [botEnabled, setBotEnabled] = useState(search.get("bot") === "1");
-  const { botAddress, acting: botActing } = useDemoBot(tableId, botEnabled);
+  const { botAddress, acting: botActing, wedged: botWedged } = useDemoBot(
+    tableId,
+    botEnabled,
+    table?.phase
+  );
 
   const onBotToggle = (next: boolean) => {
-    if (botEnabled && !next) {
+    if (botEnabled && !next && !terminal) {
       const ok = confirm(
         "Bot is mid-action. Turning off will stall the hand until you call Claim Timeout. Continue?"
       );
@@ -46,20 +56,28 @@ export default function Table() {
     tableId,
     table,
     seatIndex,
-    enabled: seatIndex !== -1,
+    enabled: seatIndex !== -1 && !terminal,
     publicKeyRegistered: pkRegistered,
     setPublicKeyRegistered: setPkRegistered,
   });
 
   if (!table) {
-    return <div className="p-8 text-ink/50">Loading table\u2026</div>;
+    return <div className="p-8 text-ink/50">Loading table...</div>;
   }
 
   const phase = table.phase as Phase;
-  const overlayActive = seatIndex !== -1 && (isAutoPhase(phase) || phase === Phase.SHOWDOWN);
+  const overlayActive = seatIndex !== -1 && !terminal && (isAutoPhase(phase) || phase === Phase.SHOWDOWN);
 
-  // Determine the opponent's hole cards visibility (only after SHOWDOWN settled).
-  const showOpponent = phase === Phase.SETTLED;
+  // Track when the current phase started so TimeoutButton can show a real
+  // countdown to the on-chain 120s deadline. Local-clock; resets on advance.
+  const [phaseStartMs, setPhaseStartMs] = useState(() => Date.now());
+  useEffect(() => {
+    setPhaseStartMs(Date.now());
+  }, [phase, tableId?.toString()]);
+
+  // Reveal opponent cards on any terminal state past DEALING (the deterministic
+  // deal makes them recoverable; we hide nothing once the hand is over).
+  const showOpponent = terminal && phase !== Phase.WAITING && phaseFromTable >= Phase.PREFLOP;
   const opponentCards = showOpponent && tableId !== undefined
     ? (() => {
         const dealt = dealHoleCards(tableId, table.players[0], table.players[1]);
@@ -67,19 +85,40 @@ export default function Table() {
       })()
     : null;
 
-  // Detect HandSettled events to trigger the winner banner. Reverse so we get
-  // the most recent settle, not the first historical one in the log buffer.
-  const settled = useMemo(() => {
-    const s = [...logs].reverse().find((l) => l.eventName === "HandSettled");
-    if (!s) return null;
-    return { winner: s.args.winner as Address, pot: s.args.pot as bigint };
+  // Detect terminal events (HandSettled OR TimeoutClaimed) for the banner.
+  const liveSettled = useMemo(() => {
+    const reversed = [...logs].reverse();
+    const handSettled = reversed.find((l) => l.eventName === "HandSettled");
+    if (handSettled) {
+      return {
+        winner: handSettled.args.winner as Address,
+        pot: handSettled.args.pot as bigint,
+        reason: "settled" as const,
+      };
+    }
+    const timeoutClaimed = reversed.find((l) => l.eventName === "TimeoutClaimed");
+    if (timeoutClaimed) {
+      return {
+        winner: timeoutClaimed.args.beneficiary as Address,
+        pot: 0n,
+        reason: "timeout" as const,
+      };
+    }
+    return null;
   }, [logs]);
+  const backfill = useHandSettled(terminal && !liveSettled ? tableId : undefined);
+  const settled = liveSettled
+    ? liveSettled
+    : backfill
+      ? { winner: backfill.winner, pot: backfill.pot, reason: backfill.reason }
+      : null;
   const [bannerTrigger, setBannerTrigger] = useState(0);
   useEffect(() => {
     if (settled) setBannerTrigger(Date.now());
-  }, [settled?.winner, settled?.pot]);
+  }, [settled?.winner, settled?.pot, settled?.reason]);
   const winnerCards = useMemo<[number, number] | null>(() => {
     if (!settled || tableId === undefined || !table) return null;
+    if (settled.reason === "timeout") return null;
     const dealt = dealHoleCards(tableId, table.players[0], table.players[1]);
     const winnerIsP0 =
       settled.winner.toLowerCase() === table.players[0].toLowerCase();
@@ -93,26 +132,44 @@ export default function Table() {
         winner={settled?.winner}
         pot={settled?.pot}
         winnerCards={winnerCards}
+        reason={settled?.reason}
         trigger={bannerTrigger}
       />
 
       <header className="flex items-center justify-between">
         <h1 className="text-xl font-bold tracking-widest">TABLE #{id}</h1>
-        <div className="text-sm text-ink/70">
-          {PHASE_LABELS[phase]}  -  pot {formatEther(table.pot)} ETH
+        <div className="text-sm text-ink/70 flex items-center gap-3">
+          <span>{PHASE_LABELS[phase]}</span>
+          <PhaseTimer
+            phase={phase}
+            resetKey={`${tableId?.toString()}-${phase}`}
+            compact
+          />
+          <span>- pot {formatEther(table.pot)} ETH</span>
         </div>
         <div className="flex items-center gap-3">
-          <TimeoutButton tableId={tableId} phase={phase} />
+          {!terminal && (
+            <TimeoutButton tableId={tableId} phase={phase} phaseStartMs={phaseStartMs} />
+          )}
           <label className="text-xs flex items-center gap-2">
             <input
               type="checkbox"
               checked={botEnabled}
               onChange={(e) => onBotToggle(e.target.checked)}
+              disabled={terminal}
             />
-            Bot {botActing ? "(acting...)" : ""}
+            Bot {terminal ? "(stopped)" : botActing ? "(acting...)" : ""}
           </label>
         </div>
       </header>
+
+      {botWedged && (
+        <div className="border border-red-700 bg-red-950/30 text-red-200 text-xs rounded p-3">
+          {botWedged}
+        </div>
+      )}
+
+      {terminal && <TerminalPanel tableId={tableId!} phase={phase} />}
 
       <div className="grid grid-cols-2 gap-4">
         <Seat
@@ -137,18 +194,23 @@ export default function Table() {
         <div className="text-xs uppercase tracking-widest text-ink/50 mb-3">Board</div>
         <div className="flex gap-3 justify-center">
           {[0, 1, 2, 3, 4].map((i) => (
-            <Card key={i} card={communityCards[i]} size="lg" />
+            <Card key={i} card={communityCards[i]} size="lg" index={i} />
           ))}
         </div>
       </div>
 
-      <ActionBar
-        enabled={isBettingPhase(phase) && isMyTurn}
-        isPending={actions.isPending}
-        onAct={(a, raise) => {
-          if (tableId !== undefined) actions.act(tableId, a, raise || 0n);
-        }}
-      />
+      {!terminal && (
+        <ActionBar
+          enabled={isBettingPhase(phase) && isMyTurn}
+          isPending={actions.isPending}
+          phase={phase}
+          logs={logs}
+          lastError={actions.lastError}
+          onAct={(a, raise) => {
+            if (tableId !== undefined) actions.act(tableId, a, raise || 0n);
+          }}
+        />
+      )}
 
       {botEnabled && botAddress && (
         <div className="text-xs text-ink/40">
@@ -156,7 +218,7 @@ export default function Table() {
         </div>
       )}
 
-      <CheatButton tableId={tableId} phase={phase} />
+      {!terminal && <CheatButton tableId={tableId} phase={phase} />}
 
       <DebugPanel
         tableId={tableId}

@@ -49,6 +49,12 @@ export const BETTING_PHASES = new Set<Phase>([
   Phase.RIVER_BET,
 ]);
 
+export const TERMINAL_PHASES = new Set<Phase>([Phase.SETTLED, Phase.CANCELLED]);
+
+export function isTerminal(p: number): boolean {
+  return TERMINAL_PHASES.has(p);
+}
+
 export function isAutoPhase(p: number): boolean {
   return AUTO_PHASES.has(p);
 }

@@ -4,18 +4,14 @@ import { useAccount, useReadContract } from "wagmi";
 import {
   parseEther,
   formatEther,
-  decodeEventLog,
-  createPublicClient,
-  http,
   type Address,
 } from "viem";
-import { sepolia } from "viem/chains";
 import { POKER_TABLE_ABI, POKER_TABLE_ADDRESS } from "../utils/contracts";
 import { useGameActions } from "../hooks/useGameActions";
 import { getBotAddress } from "../bot/botWallet";
 import { FundBotPanel } from "../components/FundBotPanel";
 import { Phase, PHASE_LABELS } from "../utils/phase";
-import { SEPOLIA_RPC } from "../utils/wagmi";
+import { tableIdFromCreateTx, rememberStakes } from "../utils/createTable";
 
 type Mode = "bot" | "manual";
 type TableTuple = [
@@ -54,7 +50,11 @@ export default function Lobby() {
   const onCreate = async () => {
     setError(null);
     try {
-      const id = await createTableAndGetId(actions, parseEther(bb), parseEther(buyIn));
+      const bbWei = parseEther(bb);
+      const buyInWei = parseEther(buyIn);
+      const hash = (await actions.createTable(bbWei, buyInWei)) as `0x${string}`;
+      rememberStakes(buyInWei, bbWei);
+      const id = await tableIdFromCreateTx(hash);
       if (id === undefined) {
         setError("Could not determine table id from receipt.");
         return;
@@ -156,50 +156,27 @@ export default function Lobby() {
         <TableList
           count={nextId ? Number(nextId as bigint) : 0}
           actions={actions}
+          hostAddress={address}
         />
       </section>
     </div>
   );
 }
 
-async function createTableAndGetId(
-  actions: ReturnType<typeof useGameActions>,
-  bb: bigint,
-  buyIn: bigint
-): Promise<bigint | undefined> {
-  const hash = (await actions.createTable(bb, buyIn)) as `0x${string}`;
-  const client = createPublicClient({ chain: sepolia, transport: http(SEPOLIA_RPC) });
-  const receipt = await client.waitForTransactionReceipt({ hash });
-  for (const log of receipt.logs) {
-    if (log.address.toLowerCase() !== POKER_TABLE_ADDRESS.toLowerCase()) continue;
-    try {
-      const parsed = decodeEventLog({
-        abi: POKER_TABLE_ABI,
-        data: log.data,
-        topics: log.topics,
-      });
-      if (parsed.eventName === "TableCreated") {
-        return (parsed.args as any).tableId as bigint;
-      }
-    } catch {
-      // not our event
-    }
-  }
-  return undefined;
-}
-
 function TableList({
   count,
   actions,
+  hostAddress,
 }: {
   count: number;
   actions: ReturnType<typeof useGameActions>;
+  hostAddress?: Address;
 }) {
   if (count === 0) return <div className="text-ink/40">No tables yet.</div>;
   return (
     <div className="space-y-2">
       {Array.from({ length: count }, (_, i) => (
-        <TableRow key={i} id={BigInt(i)} actions={actions} />
+        <TableRow key={i} id={BigInt(i)} actions={actions} hostAddress={hostAddress} />
       ))}
     </div>
   );
@@ -208,9 +185,11 @@ function TableList({
 function TableRow({
   id,
   actions,
+  hostAddress,
 }: {
   id: bigint;
   actions: ReturnType<typeof useGameActions>;
+  hostAddress?: Address;
 }) {
   const { data } = useReadContract({
     address: POKER_TABLE_ADDRESS,
@@ -220,22 +199,40 @@ function TableRow({
     query: { refetchInterval: 6000 },
   });
   if (!data) return null;
-  const [, stacks, pot, phase] = data as TableTuple;
+  const [players, stacks, pot, phase] = data as TableTuple;
   const phaseNum = phase as number;
-  const isJoinable = phaseNum === Phase.WAITING;
   const buyInToJoin = stacks[0]; // creator's stack equals buyIn during WAITING
+
+  // Player is already on this table (as either seat). Don't show Join.
+  const isOwnTable =
+    !!hostAddress &&
+    (hostAddress.toLowerCase() === players[0].toLowerCase() ||
+      hostAddress.toLowerCase() === players[1].toLowerCase());
+
+  // Join is for joining SOMEONE ELSE'S waiting table. If you created this
+  // table yourself, the bot (or a second wallet) joins. Don't let you call
+  // joinTable on a table where you're already P1: contract reverts.
+  const canJoin = phaseNum === Phase.WAITING && !isOwnTable;
+  const linkSuffix = isOwnTable ? "?bot=1" : "";
 
   return (
     <div className="border border-edge rounded p-3 flex items-center justify-between text-sm">
       <div>
-        <div>Table #{id.toString()}</div>
+        <div>
+          Table #{id.toString()}
+          {isOwnTable && (
+            <span className="ml-2 text-[10px] uppercase tracking-widest text-gold/70">
+              your seat
+            </span>
+          )}
+        </div>
         <div className="text-xs text-ink/50">
           {PHASE_LABELS[phaseNum]} - buy-in {formatEther(buyInToJoin)} ETH - pot{" "}
           {formatEther(pot)} ETH
         </div>
       </div>
       <div className="flex gap-2">
-        {isJoinable && (
+        {canJoin && (
           <button
             disabled={actions.isPending}
             onClick={() => actions.joinTable(id, buyInToJoin)}
@@ -245,7 +242,7 @@ function TableRow({
           </button>
         )}
         <Link
-          to={`/table/${id.toString()}`}
+          to={`/table/${id.toString()}${linkSuffix}`}
           className="px-3 py-1 border border-edge uppercase text-xs tracking-widest"
         >
           Open
