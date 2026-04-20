@@ -5,6 +5,7 @@ import clsx from "clsx";
 interface Props {
   card?: number; // undefined = face-down
   size?: "sm" | "md" | "lg";
+  index?: number; // when several cards reveal at once, stagger by index*120ms
 }
 
 const SIZES = {
@@ -15,19 +16,23 @@ const SIZES = {
 
 // Plays a brief flip animation when a card transitions from face-down to a
 // revealed value. Pure CSS; no deps.
-export function Card({ card, size = "md" }: Props) {
+export function Card({ card, size = "md", index = 0 }: Props) {
   const prev = useRef<number | undefined>(card);
   const [flipping, setFlipping] = useState(false);
 
   useEffect(() => {
     if (card !== undefined && prev.current !== card) {
-      setFlipping(true);
-      const t = setTimeout(() => setFlipping(false), 450);
+      const delay = index * 120;
+      const start = setTimeout(() => setFlipping(true), delay);
+      const stop = setTimeout(() => setFlipping(false), delay + 450);
       prev.current = card;
-      return () => clearTimeout(t);
+      return () => {
+        clearTimeout(start);
+        clearTimeout(stop);
+      };
     }
     prev.current = card;
-  }, [card]);
+  }, [card, index]);
 
   const sizeClass = SIZES[size];
 

@@ -12,7 +12,7 @@ export interface ZkLogEntry {
   gasUsed?: bigint;
   blockNumber?: bigint;
   timestamp: number;
-  status: "pending" | "confirmed" | "reverted";
+  status: "pending" | "confirmed" | "reverted" | "unknown";
   revertReason?: string;
 }
 
@@ -31,10 +31,15 @@ class ZkLogStore {
   };
 
   push(entry: Omit<ZkLogEntry, "id" | "timestamp"> & { timestamp?: number }) {
+    // Random suffix is purely for React key uniqueness when the same hash is
+    // pushed twice (e.g. retry before original receipt resolves). The update()
+    // path matches by txHash and hits the first match - dedup is the caller's
+    // job, not the store's.
+    const suffix = Math.random().toString(36).slice(2, 8);
     const full: ZkLogEntry = {
       ...entry,
       timestamp: entry.timestamp ?? Date.now(),
-      id: `${entry.tableId.toString()}-${entry.phase}-${entry.seat}-${entry.functionName}-${Date.now()}`,
+      id: `${entry.txHash}-${suffix}`,
     };
     this.entries = [...this.entries, full].slice(-this.max);
     this.emit();

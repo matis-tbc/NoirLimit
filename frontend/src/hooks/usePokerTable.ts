@@ -41,11 +41,28 @@ function usePokerEventSubscriber(handler: LogHandler) {
   }, []);
 }
 
-// Single source of truth: one watcher that fans out to every subscriber.
+// Module-level mount counter so even if multiple hooks call this on the same
+// page, only the FIRST one actually registers a wagmi watcher. The others
+// no-op via `enabled: false`. Without this, Table.tsx (which mounts both
+// usePokerTable and usePokerEvents) doubled the RPC subscription count and
+// every event fired the fanout twice.
+let activeWatchers = 0;
+
 function useSharedContractEventWatcher() {
+  const [isPrimary, setIsPrimary] = useState(false);
+  useEffect(() => {
+    activeWatchers += 1;
+    const primary = activeWatchers === 1;
+    setIsPrimary(primary);
+    return () => {
+      activeWatchers -= 1;
+    };
+  }, []);
+
   useWatchContractEvent({
     address: POKER_TABLE_ADDRESS,
     abi: POKER_TABLE_ABI,
+    enabled: isPrimary,
     onLogs: (logs) => {
       for (const sub of subscribers) sub(logs);
     },

@@ -69,13 +69,18 @@ export default function Spectator() {
   // Payout preview: after settle, losing side's ETH is distributed pro-rata to
   // the winning side based on contribution. Rough estimate: if user bets X on
   // side S with pool totals P_S / P_loser, expected payout = X + X * P_loser / P_S.
-  const amountWei = (() => {
+  const wagerParsed = (() => {
+    if (!wagerAmt.trim()) return { wei: 0n, error: "enter an amount" };
+    if (wagerAmt.startsWith("-")) return { wei: 0n, error: "must be positive" };
     try {
-      return parseEther(wagerAmt);
+      const wei = parseEther(wagerAmt);
+      if (wei <= 0n) return { wei: 0n, error: "must be > 0" };
+      return { wei, error: null as string | null };
     } catch {
-      return 0n;
+      return { wei: 0n, error: "invalid amount (try 0.001)" };
     }
   })();
+  const amountWei = wagerParsed.wei;
 
   const previewFor = (side: 0 | 1): bigint => {
     const yourPool = side === 0 ? pools.pool0 : pools.pool1;
@@ -123,7 +128,7 @@ export default function Spectator() {
         <div className="text-xs uppercase tracking-widest text-ink/50 mb-3">Board</div>
         <div className="flex gap-3 justify-center">
           {[0, 1, 2, 3, 4].map((i) => (
-            <Card key={i} card={communityCards[i]} size="lg" />
+            <Card key={i} card={communityCards[i]} size="lg" index={i} />
           ))}
         </div>
       </div>
@@ -151,6 +156,9 @@ export default function Spectator() {
                 />
                 <span className="text-xs text-ink/60">ETH</span>
               </div>
+              {wagerParsed.error && (
+                <div className="text-[11px] text-red-400">{wagerParsed.error}</div>
+              )}
               <div className="grid grid-cols-2 gap-2">
                 <button
                   disabled={market.isPending || amountWei === 0n}

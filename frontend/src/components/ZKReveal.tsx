@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useZkLog } from "../hooks/useZkLog";
 import { Phase, PHASE_LABELS } from "../utils/phase";
 import { TxChip } from "./TxChip";
+import { PhaseTimer } from "./PhaseTimer";
 
 interface Props {
   active: boolean;
@@ -20,13 +21,20 @@ export function ZKReveal({ active, phase, tableId }: Props) {
   const [beat, setBeat] = useState(0);
   const entries = useZkLog();
 
-  // Filter to the most recent tx for this phase and table.
+  // Pick the most useful tx to display in the "On-chain" beat:
+  //   1. A pending tx for this table (regardless of phase) takes priority,
+  //      so a tx still confirming after a phase advance stays visible.
+  //   2. Otherwise the most recent matching-phase tx.
+  // Without rule 1 the chip vanished at the moment users were most likely
+  // to inspect the Etherscan link.
   const latest = useMemo(() => {
     if (tableId === undefined) return undefined;
-    return entries
-      .slice()
-      .reverse()
-      .find((e) => e.tableId === tableId && e.phase === phase);
+    const reversed = entries.slice().reverse();
+    const pending = reversed.find(
+      (e) => e.tableId === tableId && e.status === "pending"
+    );
+    if (pending) return pending;
+    return reversed.find((e) => e.tableId === tableId && e.phase === phase);
   }, [entries, phase, tableId]);
 
   useEffect(() => {
@@ -59,6 +67,11 @@ export function ZKReveal({ active, phase, tableId }: Props) {
         </div>
 
         <p className="text-sm text-ink/80">{phaseHint}</p>
+
+        <PhaseTimer
+          phase={phase}
+          resetKey={`${tableId?.toString()}-${phase}`}
+        />
 
         <div className="grid grid-cols-3 gap-3 pt-2">
           <Beat
@@ -133,7 +146,7 @@ function Beat({
   body: string;
   icon: "eye" | "chain" | "lock";
   tx?: `0x${string}`;
-  txStatus?: "pending" | "confirmed" | "reverted";
+  txStatus?: "pending" | "confirmed" | "reverted" | "unknown";
 }) {
   return (
     <div
