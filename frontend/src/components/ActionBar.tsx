@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { parseEther } from "viem";
 import { ActionCode, Phase } from "../utils/phase";
 import type { LogEntry } from "../hooks/usePokerTable";
@@ -9,8 +9,14 @@ interface Props {
   phase: number;
   logs: LogEntry[];
   lastError?: string | null;
+  // When elapsed >= 120s the on-chain deadline has passed; act() reverts
+  // unconditionally with "deadline passed" until claimTimeout settles the
+  // table. We disable buttons rather than let the user submit doomed txs.
+  phaseStartMs?: number;
   onAct: (action: ActionCode, raise?: bigint) => void;
 }
+
+const DEADLINE_MS = 120_000;
 
 // Without a contract-side `currentBet` getter we use a heuristic: count the
 // number of ActionTaken events for this table since the last phase advance.
@@ -66,11 +72,21 @@ export function ActionBar({
   phase,
   logs,
   lastError,
+  phaseStartMs,
   onAct,
 }: Props) {
   const [raise, setRaise] = useState("0.0002");
+  const [now, setNow] = useState(() => Date.now());
   const ctx = useMemo(() => deriveActionContext(phase, logs), [phase, logs]);
   const raiseParsed = useMemo(() => parseEthSafe(raise), [raise]);
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const expired =
+    phaseStartMs !== undefined && now - phaseStartMs >= DEADLINE_MS;
+  const effectiveEnabled = enabled && !expired;
 
   const Btn = ({
     label,
@@ -85,8 +101,8 @@ export function ActionBar({
   }) => (
     <button
       onClick={onClick}
-      disabled={!enabled || isPending || disabled}
-      title={title}
+      disabled={!effectiveEnabled || isPending || disabled}
+      title={expired ? "deadline passed - use Claim Timeout to recover" : title}
       className="px-4 py-2 border border-edge hover:border-gold disabled:opacity-30 transition uppercase tracking-widest text-sm"
     >
       {label}
@@ -138,6 +154,11 @@ export function ActionBar({
           </span>
         )}
       </div>
+      {expired && enabled && (
+        <div className="text-[11px] text-red-400 px-3">
+          Phase deadline passed (120s). Click Claim Timeout in the header to settle.
+        </div>
+      )}
       {raiseParsed.error && enabled && (
         <div className="text-[11px] text-red-400 px-3">{raiseParsed.error}</div>
       )}

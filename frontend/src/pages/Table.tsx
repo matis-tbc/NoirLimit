@@ -206,6 +206,7 @@ export default function Table() {
           phase={phase}
           logs={logs}
           lastError={actions.lastError}
+          phaseStartMs={phaseStartMs}
           onAct={(a, raise) => {
             if (tableId !== undefined) actions.act(tableId, a, raise || 0n);
           }}

@@ -21,16 +21,19 @@ on a live hand.
 | Noir circuits (shuffle, decrypt, reveal) | Built, 17 tests passing |
 | Solidity contracts (PokerTable, SpectatorMarket, HandEvaluator) | Built, 65+ tests passing |
 | Sepolia deployment of PokerTable | Live in demoMode |
-| Sepolia deployment of SpectatorMarket | Pending |
+| Sepolia deployment of SpectatorMarket | Live + verified |
 | Frontend (Vite + React + wagmi + RainbowKit) | Built, runs locally |
-| In-browser bot opponent | Built (ephemeral wallet, auto-plays) |
-| Spectator wagering UI | Built (gracefully degrades until SpectatorMarket deploys) |
-| ZK reveal animation | Built (three-beat: your view → on-chain → opponent's view) |
+| In-browser bot opponent | Built (ephemeral wallet, auto-plays, retries on revert) |
+| Spectator wagering UI | Built with odds bar, payout preview, live ticker |
+| ZK reveal animation | Built (three-beat: your view, on-chain, opponent's view) |
+| Cheat button demo | Built (submits bogus revealHand, surfaces on-chain revert) |
+| Play Again rematch flow | Built (TerminalPanel after settle/cancel) |
 | External audit | Not done |
 
 **Deployed addresses (Sepolia):**
 
 - `PokerTable.sol` &mdash; [`0x6Ccaf05ac50eABE2c90b8187b9B6734dCB0E88eC`](https://sepolia.etherscan.io/address/0x6Ccaf05ac50eABE2c90b8187b9B6734dCB0E88eC)
+- `SpectatorMarket.sol` &mdash; [`0x666898f7706ddd0193012aEc50EAF7D2E9FCbAf0`](https://sepolia.etherscan.io/address/0x666898f7706ddd0193012aEc50EAF7D2E9FCbAf0)
 - `MockVerifier.sol` &mdash; [`0xAc89d6BF5cA8e8f672bA2D3994f3AE8Ae7083e40`](https://sepolia.etherscan.io/address/0xAc89d6BF5cA8e8f672bA2D3994f3AE8Ae7083e40)
 
 ## Run locally
@@ -46,6 +49,11 @@ npm run dev                      # opens http://localhost:51852
 A full hand against the in-browser bot costs ~0.005 Sepolia ETH. Hit a
 [Sepolia faucet](https://www.alchemy.com/faucets/ethereum-sepolia) if your
 wallet is dry. See [`frontend/README.md`](./frontend/README.md) for more.
+
+**Important: act within 120 seconds when it's your turn.** The contract
+enforces a per-phase deadline. Past 120s, every action reverts with
+"deadline passed" and only `claimTimeout` works (the UI surfaces a Claim
+Timeout button in the header).
 
 ## How it works
 
@@ -135,7 +143,9 @@ cd frontend && npm install && npm run build
 - **2-player heads-up only.** N-party threshold decryption is out of scope.
 - **No external audit.** 65+ contract tests are the only correctness gate.
 - **Verifier contracts are gas-heavy** and may exceed EIP-170 size limits at
-  L1; L2 deployment untested.
+  L1; L2 deployment untested. When `demoMode` flips to false, the per-tx
+  gas overrides in `frontend/src/utils/gas.ts` need to be bumped to cover
+  real Plonk verification (~250-300k extra per decrypt card).
 
 ## License
 
