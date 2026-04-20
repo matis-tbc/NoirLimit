@@ -78,7 +78,7 @@ export function usePokerTable(tableId: bigint | undefined) {
     abi: POKER_TABLE_ABI,
     functionName: "getTable",
     args: enabled ? [tableId] : undefined,
-    query: { enabled, refetchInterval: 4000 },
+    query: { enabled, refetchInterval: 2000 },
   });
 
   useSharedContractEventWatcher();

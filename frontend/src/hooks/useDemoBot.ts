@@ -107,7 +107,11 @@ export function useDemoBot(
         lastSubmitted.current = null;
       } finally {
         if (!stopped) setActing(false);
-        schedule(4000);
+        // Tight enough that the bot reacts within ~2s of any phase change
+        // the user causes. Sepolia's 12s block time still bounds each
+        // individual tx, but the gap between "your tx confirms" and "bot
+        // submits its tx" used to be 4s and is now 1.5s.
+        schedule(1500);
       }
     };
 
