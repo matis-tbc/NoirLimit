@@ -59,14 +59,34 @@ async function send(
   ctx: { tableId: bigint; phase: number; seat: number },
   value?: bigint
 ): Promise<Hex> {
-  const hash = (await bot.wallet.writeContract({
-    address: POKER_TABLE_ADDRESS,
-    abi: POKER_TABLE_ABI as any,
-    functionName: fn,
-    args,
-    value,
-    gas: gasFor(fn),
-  } as any)) as Hex;
+  let hash: Hex;
+  try {
+    hash = (await bot.wallet.writeContract({
+      address: POKER_TABLE_ADDRESS,
+      abi: POKER_TABLE_ABI as any,
+      functionName: fn,
+      args,
+      value,
+      gas: gasFor(fn),
+    } as any)) as Hex;
+  } catch (err: any) {
+    // Pre-broadcast failures (RPC rejects for insufficient funds, nonce
+    // issues, contract simulation revert) never get a tx hash, so zkLog
+    // has no entry to update. Surface the reason in the console with a
+    // prefix that's easy to grep from the dev server log.
+    const msg =
+      err?.shortMessage ||
+      err?.details ||
+      err?.message?.split("\n")[0] ||
+      String(err);
+    console.error(`[bot] ${fn} pre-broadcast failure:`, msg);
+    if (String(msg).toLowerCase().includes("insufficient funds")) {
+      throw new Error(
+        "bot wallet out of gas budget; use 'Sweep to host' then refund"
+      );
+    }
+    throw err;
+  }
   zkLog.push({
     tableId: ctx.tableId,
     phase: ctx.phase,
@@ -148,7 +168,11 @@ export async function botTick({
       : -1;
   if (seat === -1) return { acted: false, phase: t.phase };
 
-  const key = `${tableId.toString()}-${t.phase}-${seat}-${publicKeyRegistered.current}-${t.turn}`;
+  // Pot is included so the key changes whenever a player puts chips in. Without
+  // it, a CHECK-then-RAISE sequence in the same betting round leaves the bot
+  // with an identical key (same phase, same seat, turn flips 1->0->1, pkReg
+  // unchanged) and the bot skips the re-evaluation after the user raises.
+  const key = `${tableId.toString()}-${t.phase}-${seat}-${publicKeyRegistered.current}-${t.turn}-${t.pot.toString()}`;
   if (lastSubmitted.current === key) return { acted: false, phase: t.phase };
 
   const phase = t.phase;

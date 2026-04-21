@@ -14,10 +14,20 @@
 export const GAS_BY_FN: Record<string, bigint> = {
   joinTable: 250_000n,
   registerPublicKey: 100_000n,
-  submitShuffle: 5_000_000n, // 156 cold SSTOREs + calldata cost
+  // submitShuffle P1 cold path is ~3.6M (158 cold SSTOREs at 22.1k each +
+  // overhead); P2 is ~1M (warm). 4M is the conservative ceiling that keeps
+  // bot-wallet upfront gas reservation affordable on a 0.015 ETH fund at
+  // Sepolia's typical 1-3 gwei market. Tighter than 5M because the wallet
+  // needs balance >= gasLimit * maxFeePerGas PRE-broadcast.
+  submitShuffle: 4_000_000n,
   submitDecrypt: 800_000n, // up to 3 cards + community-card writes + phase advance
   act: 200_000n,
-  revealHand: 700_000n, // HandEvaluator runs inline on second revealer
+  // HandEvaluator runs inline on the SECOND revealer and iterates C(7,5)=21
+  // 5-card combinations. Existing forge test_showdown_splitPot uses ~5.2M
+  // gas for the full settle path; the second revealHand alone is closer to
+  // 2M. 700k was the cost of JUST the first revealer (no evaluator run) and
+  // caused OOG reverts for the second. 2.5M gives margin for either side.
+  revealHand: 2_500_000n,
 };
 
 export const GAS_DEFAULT = 500_000n;

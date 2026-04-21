@@ -26,6 +26,10 @@ interface Args {
   enabled: boolean;
   publicKeyRegistered: boolean;
   setPublicKeyRegistered: (b: boolean) => void;
+  // When set, the user has attempted a CheatMoment at SHOWDOWN. We skip the
+  // auto-revealHand for that seat so the cheat tx hits the contract first
+  // instead of racing the auto-reveal. The user finishes the hand manually.
+  skipShowdownRevealRef?: { current: boolean };
 }
 
 // Drives the connected human player through every non-betting phase by
@@ -38,6 +42,7 @@ export function useAutoSubmit({
   enabled,
   publicKeyRegistered,
   setPublicKeyRegistered,
+  skipShowdownRevealRef,
 }: Args) {
   const { writeContractAsync } = useWriteContract();
   const publicClient = usePublicClient();
@@ -156,16 +161,35 @@ export function useAutoSubmit({
           const p = decryptReveal(seatIndex + 1, RIVER_INDICES, REVEAL_VALUES.river);
           await write("submitDecrypt", [tableId, p.cardIndices, p.partialDecryptionValues, p.proofs, p.cardValues], ctx);
         } else if (phase === Phase.SHOWDOWN) {
+          if (skipShowdownRevealRef?.current) {
+            // User is cheating; let CheatMoment submit first. The user will
+            // manually reveal afterward via useGameActions.
+            inflightRef.current = false;
+            lastSentRef.current = null;
+            return;
+          }
           const dealt = dealHoleCards(tableId, table.players[0], table.players[1]);
           const cards = seatIndex === 0 ? dealt.p1 : dealt.p2;
           await write("revealHand", [tableId, "0x", cards], ctx);
         }
       } catch (err) {
         console.error("[autoSubmit]", err);
-        // If this was a double-register attempt (e.g. after refresh), assume the
-        // contract is the source of truth and mark registered so we stop looping.
-        if (wantsRegister) setPublicKeyRegistered(true);
-        // Otherwise allow retry on next state change (phase likely already advanced).
+        // Only treat a registerPublicKey failure as "already registered" if
+        // the revert message actually says so. Otherwise (user rejected in
+        // MetaMask, RPC timeout, gas spike) leave pkRegistered false so the
+        // next tick re-attempts. Mirrors botDriver.ts:174.
+        if (wantsRegister) {
+          const msg = String(
+            (err as any)?.shortMessage ||
+              (err as any)?.details ||
+              (err as any)?.message ||
+              ""
+          ).toLowerCase();
+          if (msg.includes("already registered")) {
+            setPublicKeyRegistered(true);
+          }
+        }
+        // Allow retry on next state change.
         lastSentRef.current = null;
       } finally {
         inflightRef.current = false;

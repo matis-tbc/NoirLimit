@@ -8,7 +8,13 @@ interface Props {
   active: boolean;
   phase: number;
   tableId?: bigint;
+  // Used so the overlay self-dismisses past the 120s deadline: if the phase
+  // has stalled (bot wedged, tx reverted) the user needs to reach the Claim
+  // Timeout button in the header, and a full-screen modal blocks it otherwise.
+  phaseStartMs?: number;
 }
+
+const DEADLINE_MS = 120_000;
 
 // Replaces the opaque pulsing ZKOverlay with a three-beat reveal that makes
 // the zero-knowledge step legible:
@@ -17,9 +23,28 @@ interface Props {
 //   3. "Opponent's view" - permanent lock, cannot decrypt
 // Must clear the grandma test: a non-crypto viewer watches 10s and can say
 // back "his cards are locked in math, not hidden by a server."
-export function ZKReveal({ active, phase, tableId }: Props) {
+export function ZKReveal({ active, phase, tableId, phaseStartMs }: Props) {
   const [beat, setBeat] = useState(0);
+  const [dismissed, setDismissed] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
   const entries = useZkLog();
+
+  // Reset the dismissed flag whenever the phase changes so the overlay
+  // comes back for the next ZK step.
+  useEffect(() => {
+    setDismissed(false);
+  }, [phase, tableId?.toString()]);
+
+  // Tick once a second so the deadline check re-evaluates without waiting
+  // for another render trigger.
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [active]);
+
+  const pastDeadline =
+    phaseStartMs !== undefined && now - phaseStartMs >= DEADLINE_MS;
 
   // Pick the most useful tx to display in the "On-chain" beat:
   //   1. A pending tx for this table (regardless of phase) takes priority,
@@ -37,29 +62,48 @@ export function ZKReveal({ active, phase, tableId }: Props) {
     return reversed.find((e) => e.tableId === tableId && e.phase === phase);
   }, [entries, phase, tableId]);
 
+  // Beat 1 (your view) appears immediately when the overlay activates.
+  // Beat 2 (on-chain) waits for a tx to enter the log. Beat 3 (opponent's
+  // view) waits for confirmation. Sepolia block time is ~12-15s, so the
+  // old wall-clock rhythm landed "Tx confirmed" before the receipt was
+  // actually in. Tying beats to tx status keeps the copy honest.
   useEffect(() => {
     if (!active) {
       setBeat(0);
       return;
     }
-    setBeat(1);
-    const t1 = setTimeout(() => setBeat(2), 1200);
-    const t2 = setTimeout(() => setBeat(3), 2400);
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-    };
-  }, [active, phase]);
+    if (!latest) {
+      setBeat(1);
+      return;
+    }
+    if (latest.status === "pending") {
+      setBeat(2);
+      return;
+    }
+    // confirmed | reverted | unknown all advance to the final beat; the
+    // body copy below reflects the specific status.
+    setBeat(3);
+  }, [active, latest?.txHash, latest?.status]);
 
   if (!active) return null;
+  // Self-dismiss past the on-chain deadline so the Claim Timeout button in
+  // the header becomes reachable. Also dismiss if the user explicitly closed.
+  if (pastDeadline || dismissed) return null;
 
   const phaseLabel = PHASE_LABELS[phase] || "...";
   const phaseHint = getPhaseHint(phase);
 
   return (
     <div className="fixed inset-0 z-40 bg-black/85 backdrop-blur flex items-center justify-center">
-      <div className="max-w-3xl w-[90%] border border-gold/50 bg-bg p-6 space-y-5">
-        <div className="flex items-center justify-between">
+      <div className="max-w-3xl w-[90%] border border-gold/50 bg-bg p-6 space-y-5 relative">
+        <button
+          onClick={() => setDismissed(true)}
+          className="absolute top-2 right-2 text-ink/50 hover:text-ink text-xs px-2 py-1 border border-edge hover:border-gold/60"
+          title="Close overlay (phase will still complete in the background)"
+        >
+          close
+        </button>
+        <div className="flex items-center justify-between pr-10">
           <div className="text-[10px] uppercase tracking-[0.3em] text-gold">
             Zero-knowledge step
           </div>
@@ -83,11 +127,7 @@ export function ZKReveal({ active, phase, tableId }: Props) {
           <Beat
             active={beat >= 2}
             title="On-chain"
-            body={
-              latest
-                ? `Encrypted commitment submitted. Tx confirmed.`
-                : "Encrypted commitment submitted to Sepolia."
-            }
+            body={onChainCopy(latest?.status)}
             icon="chain"
             tx={latest?.txHash}
             txStatus={latest?.status}
@@ -175,6 +215,14 @@ function IconGlyph({ kind }: { kind: "eye" | "chain" | "lock" }) {
   if (kind === "eye") return <span>[eye]</span>;
   if (kind === "chain") return <span>[chain]</span>;
   return <span>[lock]</span>;
+}
+
+function onChainCopy(status?: "pending" | "confirmed" | "reverted" | "unknown"): string {
+  if (!status) return "Waiting to broadcast encrypted commitment.";
+  if (status === "pending") return "Encrypted commitment submitted. Tx mining on Sepolia...";
+  if (status === "confirmed") return "Encrypted commitment submitted. Tx confirmed.";
+  if (status === "reverted") return "Tx reverted on-chain. See chip for details.";
+  return "Tx status unknown. Check Etherscan.";
 }
 
 function getPhaseHint(phase: number): string {

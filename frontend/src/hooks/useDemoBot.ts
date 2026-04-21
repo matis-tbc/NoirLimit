@@ -34,6 +34,14 @@ export function useDemoBot(
   const phaseRef = useRef<number | undefined>(phase);
   phaseRef.current = phase;
 
+  // When the phase advances, any retry counter carried over from a prior
+  // step is stale. Clearing it avoids a premature wedge if a transient
+  // failure (RPC blip, gas spike) built up retries before the opponent
+  // moved the game forward.
+  useEffect(() => {
+    retries.current.clear();
+  }, [phase]);
+
   useEffect(() => {
     if (!enabled || !address) {
       clientsRef.current = null;
