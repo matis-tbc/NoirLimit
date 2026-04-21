@@ -3,8 +3,9 @@ pragma solidity ^0.8.24;
 
 import "./interfaces/IPokerTable.sol";
 import "./interfaces/ISpectatorMarket.sol";
+import "./ReentrancyGuard.sol";
 
-contract SpectatorMarket is ISpectatorMarket {
+contract SpectatorMarket is ISpectatorMarket, ReentrancyGuard {
     uint8 internal constant UNRESOLVED = type(uint8).max;
 
     struct Market {
@@ -111,7 +112,7 @@ contract SpectatorMarket is ISpectatorMarket {
         emit WagersResolved(tableId, winner);
     }
 
-    function claimWinnings(uint256 tableId) external override {
+    function claimWinnings(uint256 tableId) external override nonReentrant {
         Market storage market = markets[tableId];
         require(market.resolved, "market not resolved");
 

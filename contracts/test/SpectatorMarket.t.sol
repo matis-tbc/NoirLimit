@@ -438,4 +438,51 @@ contract SpectatorMarketTest is Test {
         vm.expectRevert("no wager");
         market.claimWinnings(tid);
     }
+
+    function test_reentrancy_blocked() public {
+        uint256 tid = _createAndJoin();
+        _place(s1, tid, p1, 1 ether);
+
+        ReentrantClaimer attacker = new ReentrantClaimer(market, tid);
+        vm.deal(address(attacker), 1 ether);
+        attacker.place(p1);
+
+        _toPreflop(tid);
+        _settlePlayer1WinByFold(tid);
+        market.resolveWagers(tid);
+
+        // With the nonReentrant guard, the re-enter call inside receive()
+        // reverts with "reentrant". The outer claim then reverts because the
+        // low-level call returns false and "transfer failed" triggers.
+        vm.expectRevert("transfer failed");
+        attacker.triggerClaim();
+
+        // Book-keeping: attacker.claimed is NOT set (whole tx reverted).
+        (, , bool claimed) = market.getWager(tid, address(attacker));
+        assertFalse(claimed, "wager should not be marked claimed after revert");
+    }
+}
+
+contract ReentrantClaimer {
+    SpectatorMarket public market;
+    uint256 public tid;
+
+    constructor(SpectatorMarket m, uint256 t) {
+        market = m;
+        tid = t;
+    }
+
+    function place(address predictedWinner) external {
+        market.placeWager{value: address(this).balance}(tid, predictedWinner);
+    }
+
+    function triggerClaim() external {
+        market.claimWinnings(tid);
+    }
+
+    receive() external payable {
+        // Attempt re-entry. If the guard works this reverts with "reentrant",
+        // which bubbles up as a failed transfer in the parent claim.
+        market.claimWinnings(tid);
+    }
 }
