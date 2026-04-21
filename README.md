@@ -8,6 +8,18 @@ on a live hand.
 > **Demo only.** Live on Sepolia testnet in `demoMode = true` with a mock
 > verifier. See [SECURITY.md](./SECURITY.md) for the full posture.
 
+## Why NoirLimit
+
+NoirLimit is a ZK poker reference implementation in Noir with a pari-mutuel
+**spectator wagering market baked into the protocol**. Observers stake on
+outcomes while hole cards stay encrypted until showdown, which is, as far as
+we can tell, genuinely novel among ZK poker projects. The current deployment
+runs `demoMode = true` against a `MockVerifier`: contract-level invariants
+like "your revealed hand must match on-chain commitments" still enforce
+correctness, but the Noir circuits themselves are bypassed on-chain. With a
+real verifier on, the circuits catch a bogus reveal one layer earlier.
+See [SECURITY.md](./SECURITY.md) for what this does and does not prove.
+
 ## Team
 
 - **Matis** ([@matis-tbc](https://github.com/matis-tbc))
@@ -19,15 +31,19 @@ on a live hand.
 | Layer | State |
 |---|---|
 | Noir circuits (shuffle, decrypt, reveal) | Built, 17 tests passing |
-| Solidity contracts (PokerTable, SpectatorMarket, HandEvaluator) | Built, 65+ tests passing |
+| Solidity contracts (PokerTable, SpectatorMarket, HandEvaluator) | Built, 90 tests passing |
 | Sepolia deployment of PokerTable | Live in demoMode |
-| Sepolia deployment of SpectatorMarket | Live + verified |
+| Sepolia deployment of SpectatorMarket | Live + verified (source-only reentrancy guard pending redeploy) |
 | Frontend (Vite + React + wagmi + RainbowKit) | Built, runs locally |
 | In-browser bot opponent | Built (ephemeral wallet, auto-plays, retries on revert) |
-| Spectator wagering UI | Built with odds bar, payout preview, live ticker |
-| ZK reveal animation | Built (three-beat: your view, on-chain, opponent's view) |
-| Cheat button demo | Built (submits bogus revealHand, surfaces on-chain revert) |
+| Spectator wagering UI | Built with odds bar, time-series sparkline, sealed-state badge, live ticker |
+| ZK reveal animation | Built (three-beat tied to tx lifecycle, dismissable) |
+| Cheat moment | Built (`<CheatMoment>` dedicated component, confirm + caught modals, demoMode-truthful copy) |
+| Move history panel | Built (player-readable, grouped by betting round, on Table and Spectator) |
 | Play Again rematch flow | Built (TerminalPanel after settle/cancel) |
+| Hide tables from Lobby | Built (localStorage, per-wallet) |
+| Wallet-signature banner | Built (tells user MetaMask popup is expected) |
+| Frontend test infra | vitest + RTL + happy-dom, `npm run test` runs parseRevert unit suite |
 | External audit | Not done |
 
 **Deployed addresses (Sepolia):**
@@ -38,6 +54,19 @@ on a live hand.
 
 ## Run locally
 
+**Prerequisites:**
+
+- [MetaMask](https://metamask.io/) browser extension installed and set to the
+  Sepolia testnet (MetaMask → Networks → "Show test networks" → Sepolia). Pin
+  the extension to your toolbar so signature popups attach to the page instead
+  of opening a separate window.
+- A Sepolia RPC endpoint. Free tier from [Alchemy](https://www.alchemy.com/)
+  or [Infura](https://www.infura.io/) works; paste the URL into
+  `frontend/.env.local` as `VITE_SEPOLIA_RPC`.
+- ~0.03 Sepolia ETH in your host wallet (0.015 to fund the bot, rest for
+  your own gas across ~17 sequential txs per hand). Free from the
+  [Sepolia faucet](https://www.alchemy.com/faucets/ethereum-sepolia).
+
 ```bash
 git clone https://github.com/matis-tbc/NoirLimit.git
 cd NoirLimit/frontend
@@ -46,9 +75,17 @@ npm install
 npm run dev                      # opens http://localhost:51852
 ```
 
-A full hand against the in-browser bot costs ~0.005 Sepolia ETH. Hit a
+A full hand against the in-browser bot costs ~0.015 Sepolia ETH in bot gas
+plus ~0.005 for your own txs. Hit a
 [Sepolia faucet](https://www.alchemy.com/faucets/ethereum-sepolia) if your
 wallet is dry. See [`frontend/README.md`](./frontend/README.md) for more.
+
+For a deeper look at the protocol, see
+[`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) (three-layer diagram with
+the demoMode asterisks called out) and
+[`docs/WALKTHROUGH.md`](./docs/WALKTHROUGH.md) (guided tour of four
+hotspots: the shuffle circuit, the state machine guard, the reveal
+invariant, and the demoMode dealing short-circuit).
 
 **Important: act within 120 seconds when it's your turn.** The contract
 enforces a per-phase deadline. Past 120s, every action reverts with

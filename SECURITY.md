@@ -54,15 +54,20 @@ service whose key is held by the operator.
 ## No external audit
 
 The Solidity contracts and Noir circuits have not been audited. The contract
-test suite (65+ Foundry tests, ~1257 lines) is the only correctness gate.
-Several edge cases the post-build review flagged are still open:
+test suite (90 Foundry tests + 17 Noir tests) is the only correctness gate.
+Recent review items:
 
-- `SpectatorMarket` reentrancy on `claimWinnings` (sends ETH; not currently
-  protected by `nonReentrant`)
-- `SpectatorMarket` claim-by-loser path (zero payout; not explicitly tested)
-- `SpectatorMarket` late wager arriving in the same block as phase advance
-
-These are tracked for the post-demo infra phase (see the project plan).
+- `SpectatorMarket.claimWinnings` reentrancy: **fixed in source** via a
+  `nonReentrant` modifier in `contracts/src/SpectatorMarket.sol` backed by a
+  minimal in-tree guard at `contracts/src/ReentrancyGuard.sol`. Verified by
+  `test_reentrancy_blocked` in `contracts/test/SpectatorMarket.t.sol`. The
+  live deployment at `0x666898...` predates this fix and runs unguarded; the
+  CEI pattern at `claimWinnings:122` (state lock set before the external
+  call) keeps the live build practically safe until a redeploy.
+- `SpectatorMarket` claim-by-loser path (zero payout): still not explicitly
+  tested; flagged for the post-demo infra phase.
+- `SpectatorMarket` late wager arriving in the same block as phase advance:
+  not tested; flagged for the post-demo infra phase.
 
 ## Threat model boundary
 
