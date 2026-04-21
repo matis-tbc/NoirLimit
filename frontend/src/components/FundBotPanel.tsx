@@ -8,8 +8,11 @@ interface Props {
   botAddress?: Address;
 }
 
-const FUND_AMOUNT = parseEther("0.005");
-const MIN_RUN = parseEther("0.004");
+// Enough for buy-in (~0.001) + ~17 sequential tx gas budgets on Sepolia's
+// 1-3 gwei market. 0.005 was too tight once submitShuffle at a 4M gas limit
+// demands ~0.008 ETH reservation at 2 gwei; RPC rejects pre-broadcast.
+const FUND_AMOUNT = parseEther("0.015");
+const MIN_RUN = parseEther("0.012");
 const MAX_HOLD = parseEther("0.05"); // sanity cap
 
 export function FundBotPanel({ botAddress }: Props) {

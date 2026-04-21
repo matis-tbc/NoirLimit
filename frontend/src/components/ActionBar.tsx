@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { parseEther } from "viem";
 import { ActionCode, Phase } from "../utils/phase";
 import type { LogEntry } from "../hooks/usePokerTable";
+import { TimeoutButton } from "./TimeoutButton";
 
 interface Props {
   enabled: boolean;
@@ -13,31 +14,50 @@ interface Props {
   // unconditionally with "deadline passed" until claimTimeout settles the
   // table. We disable buttons rather than let the user submit doomed txs.
   phaseStartMs?: number;
+  tableId?: bigint;
   onAct: (action: ActionCode, raise?: bigint) => void;
 }
 
 const DEADLINE_MS = 120_000;
+// When the deadline is this close, surface the TimeoutButton adjacent to the
+// action buttons so the user doesn't have to hunt the header for recovery.
+const DEADLINE_NEAR_MS = 90_000;
 
-// Without a contract-side `currentBet` getter we use a heuristic: count the
-// number of ActionTaken events for this table since the last phase advance.
-// On the FIRST action of a betting round:
-//   - PREFLOP: small blind owes BB/2 -> CHECK is invalid
-//   - FLOP_BET / TURN_BET / RIVER_BET: nothing to call -> CALL is invalid
-// After any action this round we re-enable both buttons (we no longer know
-// for sure who owes what; let the contract decide).
+// UI-side mirror of the contract's can-check / can-call rules. The contract
+// at PokerTable.sol:309 computes toCall = currentBet - roundContribution,
+// then rejects CHECK when toCall > 0 and CALL when toCall == 0. We can't
+// read currentBet directly from getTable(), so we derive from the
+// ActionTaken event stream for the current betting round:
+//
+//   - Round boundary = latest CommunityCardsRevealed / PlayerJoined /
+//     TableCreated. ActionTaken events before that belong to a previous
+//     round.
+//   - PREFLOP special case: before any action, SB owes BB so CHECK is
+//     invalid and CALL is valid.
+//   - After any RAISE in the round, the non-raising seat faces a bet:
+//     CALL / RAISE / FOLD are valid, CHECK is not.
+//   - After any CHECK or CALL with no subsequent RAISE, no one owes: only
+//     CHECK / RAISE / FOLD are valid, CALL is not.
+//
+// The contract is still the source of truth; if our derivation is wrong
+// the tx reverts and the user sees the reason in lastError.
 function deriveActionContext(phase: number, logs: LogEntry[]) {
   const isBetting =
     phase === Phase.PREFLOP ||
     phase === Phase.FLOP_BET ||
     phase === Phase.TURN_BET ||
     phase === Phase.RIVER_BET;
-  if (!isBetting) return { canCheck: true, canCall: true, isFirstAction: false };
+  if (!isBetting) {
+    return {
+      canCheck: true,
+      canCall: true,
+      isFirstAction: false,
+      facingRaise: false,
+    };
+  }
 
-  // Count ActionTaken events since the last phase advance event. A phase
-  // advance is approximated by the latest CommunityCardsRevealed (for
-  // post-flop rounds) or PlayerJoined (for the first preflop round).
   const reversed = [...logs].reverse();
-  let actionsThisRound = 0;
+  const roundActions: LogEntry[] = [];
   for (const l of reversed) {
     if (
       l.eventName === "CommunityCardsRevealed" ||
@@ -46,12 +66,26 @@ function deriveActionContext(phase: number, logs: LogEntry[]) {
     ) {
       break;
     }
-    if (l.eventName === "ActionTaken") actionsThisRound += 1;
+    if (l.eventName === "ActionTaken") roundActions.unshift(l);
   }
-  const isFirstAction = actionsThisRound === 0;
-  const canCheck = phase === Phase.PREFLOP ? !isFirstAction : true;
-  const canCall = phase === Phase.PREFLOP ? true : !isFirstAction;
-  return { canCheck, canCall, isFirstAction };
+
+  const isFirstAction = roundActions.length === 0;
+  const last = roundActions[roundActions.length - 1]?.args;
+  // Action enum in the contract: 0 FOLD, 1 CHECK, 2 CALL, 3 RAISE.
+  const facingRaise = last ? Number(last.action) === 3 : false;
+
+  if (phase === Phase.PREFLOP && isFirstAction) {
+    // SB acts first preflop; BB is a standing bet. SB must call, raise, or
+    // fold. CHECK is invalid.
+    return { canCheck: false, canCall: true, isFirstAction: true, facingRaise: true };
+  }
+
+  if (facingRaise) {
+    return { canCheck: false, canCall: true, isFirstAction: false, facingRaise: true };
+  }
+
+  // Post a CHECK or CALL with no subsequent raise: nothing to call.
+  return { canCheck: true, canCall: false, isFirstAction, facingRaise: false };
 }
 
 function parseEthSafe(v: string): { wei: bigint; error: string | null } {
@@ -73,6 +107,7 @@ export function ActionBar({
   logs,
   lastError,
   phaseStartMs,
+  tableId,
   onAct,
 }: Props) {
   const [raise, setRaise] = useState("0.0002");
@@ -84,8 +119,9 @@ export function ActionBar({
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
   }, []);
-  const expired =
-    phaseStartMs !== undefined && now - phaseStartMs >= DEADLINE_MS;
+  const elapsed = phaseStartMs !== undefined ? now - phaseStartMs : 0;
+  const expired = phaseStartMs !== undefined && elapsed >= DEADLINE_MS;
+  const deadlineNear = phaseStartMs !== undefined && elapsed >= DEADLINE_NEAR_MS;
   const effectiveEnabled = enabled && !expired;
 
   const Btn = ({
@@ -110,12 +146,12 @@ export function ActionBar({
   );
 
   const checkTip = !ctx.canCheck
-    ? phase === Phase.PREFLOP
-      ? "you owe the big blind - call or raise"
-      : undefined
+    ? phase === Phase.PREFLOP && ctx.isFirstAction
+      ? "you owe the big blind - call, raise, or fold"
+      : "facing a bet - call, raise, or fold"
     : undefined;
   const callTip = !ctx.canCall
-    ? "nothing to call - check or raise"
+    ? "nothing to call - check, raise, or fold"
     : undefined;
 
   return (
@@ -148,11 +184,21 @@ export function ActionBar({
             title={raiseParsed.error || undefined}
           />
         </div>
-        {isPending && (
-          <span className="text-[11px] text-yellow-400 ml-2 animate-pulse">
-            broadcasting...
-          </span>
-        )}
+        <span
+          className="text-[11px] text-yellow-400 ml-2 animate-pulse"
+          style={{ visibility: isPending ? "visible" : "hidden" }}
+        >
+          broadcasting...
+        </span>
+        <div className="ml-auto" style={{ minWidth: 150 }}>
+          {deadlineNear && (
+            <TimeoutButton
+              tableId={tableId}
+              phase={phase}
+              phaseStartMs={phaseStartMs}
+            />
+          )}
+        </div>
       </div>
       {expired && enabled && (
         <div className="text-[11px] text-red-400 px-3">

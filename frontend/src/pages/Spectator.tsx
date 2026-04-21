@@ -1,5 +1,5 @@
 import { useParams } from "react-router-dom";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAccount } from "wagmi";
 import { formatEther, parseEther, type Address } from "viem";
 import { usePokerTable } from "../hooks/usePokerTable";
@@ -7,14 +7,21 @@ import { useSpectatorMarket, spectatorEnabled } from "../hooks/useSpectatorMarke
 import { Seat } from "../components/Seat";
 import { Card } from "../components/Card";
 import { OddsBar } from "../components/OddsBar";
+import { OddsSparkline } from "../components/OddsSparkline";
+import { SealedStateBadge } from "../components/SealedStateBadge";
+import { MoveHistory } from "../components/MoveHistory";
 import { WagerTicker } from "../components/WagerTicker";
+import { usePokerEvents } from "../hooks/usePokerTable";
 import { Phase, PHASE_LABELS } from "../utils/phase";
+
+const MAX_HISTORY = 20;
 
 export default function Spectator() {
   const { id } = useParams<{ id: string }>();
   const tableId = id ? BigInt(id) : undefined;
   const { address } = useAccount();
   const { table, communityCards } = usePokerTable(tableId);
+  const logs = usePokerEvents(tableId);
   const market = useSpectatorMarket(tableId, address);
   const [wagerAmt, setWagerAmt] = useState("0.0002");
 
@@ -27,6 +34,24 @@ export default function Spectator() {
       resolved: m[3] as boolean,
     };
   }, [market.market]);
+
+  // Bounded history of the P1 win-probability implied by pool ratios. Sampled
+  // on every pools change, deduped when the percentage doesn't move, capped
+  // at MAX_HISTORY so a long hand doesn't blow up render depth.
+  const [oddsHistory, setOddsHistory] = useState<
+    Array<{ pct0: number; ts: number }>
+  >([]);
+  useEffect(() => {
+    const total = pools.pool0 + pools.pool1;
+    if (total === 0n) return;
+    const pct0 = Number((pools.pool0 * 10000n) / total) / 100;
+    setOddsHistory((prev) => {
+      const last = prev[prev.length - 1];
+      if (last && Math.abs(last.pct0 - pct0) < 0.01) return prev;
+      const next = [...prev, { pct0, ts: Date.now() }];
+      return next.length > MAX_HISTORY ? next.slice(-MAX_HISTORY) : next;
+    });
+  }, [pools.pool0, pools.pool1]);
 
   if (!spectatorEnabled) {
     return (
@@ -135,8 +160,17 @@ export default function Spectator() {
 
       <div className="grid md:grid-cols-[1fr_320px] gap-4">
         <div className="border border-edge rounded p-4 space-y-4">
-          <div className="text-xs uppercase tracking-widest text-ink/60">Market</div>
+          <div className="flex items-center justify-between">
+            <div className="text-xs uppercase tracking-widest text-ink/60">Market</div>
+            <SealedStateBadge phase={phase} />
+          </div>
           <OddsBar pool0={pools.pool0} pool1={pools.pool1} />
+          <div>
+            <div className="text-[10px] uppercase tracking-widest text-ink/50 mb-1">
+              P1 odds (last {oddsHistory.length} changes)
+            </div>
+            <OddsSparkline points={oddsHistory} />
+          </div>
           <div className="text-[11px] text-ink/60">{countdown}</div>
 
           {wagerOpen && isPlayer && (
@@ -215,7 +249,10 @@ export default function Spectator() {
           )}
         </div>
 
-        <WagerTicker tableId={tableId} players={table.players as [Address, Address]} />
+        <div className="space-y-4">
+          <WagerTicker tableId={tableId} players={table.players as [Address, Address]} />
+          <MoveHistory logs={logs} />
+        </div>
       </div>
     </div>
   );

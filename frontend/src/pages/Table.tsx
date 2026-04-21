@@ -1,5 +1,5 @@
 import { useParams, useSearchParams } from "react-router-dom";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAccount } from "wagmi";
 import { formatEther, type Address } from "viem";
 import { usePokerTable, usePokerEvents } from "../hooks/usePokerTable";
@@ -12,11 +12,13 @@ import { ActionBar } from "../components/ActionBar";
 import { EventLog } from "../components/EventLog";
 import { ZKReveal } from "../components/ZKReveal";
 import { DebugPanel } from "../components/DebugPanel";
-import { CheatButton } from "../components/CheatButton";
+import { CheatMoment } from "../components/CheatMoment";
 import { WinnerBanner } from "../components/WinnerBanner";
 import { TimeoutButton } from "../components/TimeoutButton";
 import { PhaseTimer } from "../components/PhaseTimer";
 import { TerminalPanel } from "../components/TerminalPanel";
+import { WalletPendingBanner } from "../components/WalletPendingBanner";
+import { MoveHistory } from "../components/MoveHistory";
 import { useHandSettled } from "../hooks/useHandSettled";
 import { Phase, PHASE_LABELS, isAutoPhase, isBettingPhase, isTerminal } from "../utils/phase";
 import { dealHoleCards } from "../utils/deal";
@@ -52,6 +54,22 @@ export default function Table() {
   };
 
   const [pkRegistered, setPkRegistered] = useState(false);
+  // Reset on tableId change so switching tables re-registers the host key.
+  useEffect(() => {
+    setPkRegistered(false);
+  }, [tableId?.toString()]);
+
+  // When the user attempts a cheat at SHOWDOWN, this ref flips true and
+  // useAutoSubmit skips auto-revealing the user's real cards so the cheat tx
+  // hits the contract first. After the cheat resolves (a revert or the
+  // rare success path) the user clicks "Submit real reveal" in CheatMoment
+  // to finish the hand via useGameActions.revealHand.
+  const cheatAttemptedRef = useRef(false);
+  useEffect(() => {
+    // New hand -> reset the gate.
+    cheatAttemptedRef.current = false;
+  }, [tableId?.toString()]);
+
   useAutoSubmit({
     tableId,
     table,
@@ -59,31 +77,42 @@ export default function Table() {
     enabled: seatIndex !== -1 && !terminal,
     publicKeyRegistered: pkRegistered,
     setPublicKeyRegistered: setPkRegistered,
+    skipShowdownRevealRef: cheatAttemptedRef,
   });
 
-  if (!table) {
-    return <div className="p-8 text-ink/50">Loading table...</div>;
-  }
+  const phase = (table?.phase ?? Phase.WAITING) as Phase;
+  const overlayActive =
+    !!table && seatIndex !== -1 && !terminal && (isAutoPhase(phase) || phase === Phase.SHOWDOWN);
 
-  const phase = table.phase as Phase;
-  const overlayActive = seatIndex !== -1 && !terminal && (isAutoPhase(phase) || phase === Phase.SHOWDOWN);
+  // Flash a "+N" next to the pot for 3s whenever it grows. Gives the user a
+  // visible confirmation that their chips went to the pot (pairs with the
+  // Seat component's stack-decrease delta). Undefined ref until the first
+  // real pot read so we don't flash on initial mount.
+  const prevPotRef = useRef<bigint | undefined>(undefined);
+  const [potDelta, setPotDelta] = useState<bigint>(0n);
+  useEffect(() => {
+    const cur = table?.pot;
+    if (cur === undefined) return;
+    if (prevPotRef.current === undefined) {
+      prevPotRef.current = cur;
+      return;
+    }
+    const d = cur - prevPotRef.current;
+    prevPotRef.current = cur;
+    if (d <= 0n) return;
+    setPotDelta(d);
+    const id = setTimeout(() => setPotDelta(0n), 3000);
+    return () => clearTimeout(id);
+  }, [table?.pot]);
 
-  // Track when the current phase started so TimeoutButton can show a real
-  // countdown to the on-chain 120s deadline. Local-clock; resets on advance.
+  // Track when the current *action window* started so TimeoutButton shows a
+  // real countdown to the on-chain deadline. The contract resets the deadline
+  // on EVERY successful action (PokerTable.sol:361), not just on phase
+  // advance. So reset on turn flips AND phase changes AND tableId changes.
   const [phaseStartMs, setPhaseStartMs] = useState(() => Date.now());
   useEffect(() => {
     setPhaseStartMs(Date.now());
-  }, [phase, tableId?.toString()]);
-
-  // Reveal opponent cards on any terminal state past DEALING (the deterministic
-  // deal makes them recoverable; we hide nothing once the hand is over).
-  const showOpponent = terminal && phase !== Phase.WAITING && phaseFromTable >= Phase.PREFLOP;
-  const opponentCards = showOpponent && tableId !== undefined
-    ? (() => {
-        const dealt = dealHoleCards(tableId, table.players[0], table.players[1]);
-        return seatIndex === 0 ? dealt.p2 : dealt.p1;
-      })()
-    : null;
+  }, [phase, table?.turn, tableId?.toString()]);
 
   // Detect terminal events (HandSettled OR TimeoutClaimed) for the banner.
   const liveSettled = useMemo(() => {
@@ -125,9 +154,29 @@ export default function Table() {
     return winnerIsP0 ? dealt.p1 : dealt.p2;
   }, [settled, tableId, table]);
 
+  if (!table) {
+    return <div className="p-8 text-ink/50">Loading table...</div>;
+  }
+
+  // Reveal opponent cards on any terminal state past DEALING (the deterministic
+  // deal makes them recoverable; we hide nothing once the hand is over).
+  const showOpponent = terminal && phase !== Phase.WAITING && phaseFromTable >= Phase.PREFLOP;
+  const opponentCards = showOpponent && tableId !== undefined
+    ? (() => {
+        const dealt = dealHoleCards(tableId, table.players[0], table.players[1]);
+        return seatIndex === 0 ? dealt.p2 : dealt.p1;
+      })()
+    : null;
+
   return (
     <div className="max-w-5xl mx-auto px-6 py-6 space-y-6">
-      <ZKReveal active={overlayActive} phase={phase} tableId={tableId} />
+      <WalletPendingBanner pending={actions.isPending} />
+      <ZKReveal
+        active={overlayActive}
+        phase={phase}
+        tableId={tableId}
+        phaseStartMs={phaseStartMs}
+      />
       <WinnerBanner
         winner={settled?.winner}
         pot={settled?.pot}
@@ -136,29 +185,55 @@ export default function Table() {
         trigger={bannerTrigger}
       />
 
-      <header className="flex items-center justify-between">
-        <h1 className="text-xl font-bold tracking-widest">TABLE #{id}</h1>
-        <div className="text-sm text-ink/70 flex items-center gap-3">
+      <header className="flex items-center justify-between gap-4">
+        <h1 className="text-xl font-bold tracking-widest shrink-0">
+          TABLE #{id}
+        </h1>
+        <div className="text-sm text-ink/70 flex items-center gap-3 font-mono tabular-nums">
           <span>{PHASE_LABELS[phase]}</span>
           <PhaseTimer
             phase={phase}
-            resetKey={`${tableId?.toString()}-${phase}`}
+            resetKey={`${tableId?.toString()}-${phase}-${table.turn}`}
             compact
           />
-          <span>- pot {formatEther(table.pot)} ETH</span>
+          <span className="inline-flex items-baseline gap-1">
+            - pot {formatEther(table.pot)} ETH
+            {potDelta > 0n && (
+              <span className="text-[10px] text-green-400">
+                +{formatEther(potDelta)}
+              </span>
+            )}
+          </span>
         </div>
-        <div className="flex items-center gap-3">
-          {!terminal && (
-            <TimeoutButton tableId={tableId} phase={phase} phaseStartMs={phaseStartMs} />
-          )}
-          <label className="text-xs flex items-center gap-2">
+        <div className="flex items-center gap-3 shrink-0">
+          <div style={{ minWidth: 120 }}>
+            {!terminal && (
+              <TimeoutButton tableId={tableId} phase={phase} phaseStartMs={phaseStartMs} />
+            )}
+          </div>
+          <label className="text-xs flex items-center gap-2" style={{ minWidth: 120 }}>
             <input
               type="checkbox"
               checked={botEnabled}
               onChange={(e) => onBotToggle(e.target.checked)}
               disabled={terminal}
             />
-            Bot {terminal ? "(stopped)" : botActing ? "(acting...)" : ""}
+            <span className="inline-flex items-center gap-1.5">
+              <span
+                className={
+                  "w-1.5 h-1.5 rounded-full " +
+                  (terminal
+                    ? "bg-ink/30"
+                    : botActing
+                      ? "bg-yellow-400 animate-pulse"
+                      : "bg-green-500/70")
+                }
+              />
+              Bot
+              <span className="text-ink/40 text-[10px] uppercase tracking-widest">
+                {terminal ? "stopped" : botActing ? "acting" : "idle"}
+              </span>
+            </span>
           </label>
         </div>
       </header>
@@ -199,6 +274,12 @@ export default function Table() {
         </div>
       </div>
 
+      <MoveHistory
+        logs={logs}
+        youAddress={address}
+        botAddress={botEnabled ? botAddress : undefined}
+      />
+
       {!terminal && (
         <ActionBar
           enabled={isBettingPhase(phase) && isMyTurn}
@@ -207,6 +288,7 @@ export default function Table() {
           logs={logs}
           lastError={actions.lastError}
           phaseStartMs={phaseStartMs}
+          tableId={tableId}
           onAct={(a, raise) => {
             if (tableId !== undefined) actions.act(tableId, a, raise || 0n);
           }}
@@ -219,7 +301,31 @@ export default function Table() {
         </div>
       )}
 
-      {!terminal && <CheatButton tableId={tableId} phase={phase} />}
+      {!terminal && (
+        <CheatMoment
+          tableId={tableId}
+          phase={phase}
+          realCards={
+            tableId !== undefined && seatIndex !== -1
+              ? (() => {
+                  const dealt = dealHoleCards(
+                    tableId,
+                    table.players[0],
+                    table.players[1]
+                  );
+                  return seatIndex === 0 ? dealt.p1 : dealt.p2;
+                })()
+              : null
+          }
+          onAttempt={() => {
+            cheatAttemptedRef.current = true;
+          }}
+          onRealReveal={async (cards) => {
+            if (tableId === undefined) return;
+            await actions.revealHand(tableId, cards);
+          }}
+        />
+      )}
 
       <DebugPanel
         tableId={tableId}

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAccount, useReadContract } from "wagmi";
 import {
@@ -10,8 +10,10 @@ import { POKER_TABLE_ABI, POKER_TABLE_ADDRESS } from "../utils/contracts";
 import { useGameActions } from "../hooks/useGameActions";
 import { getBotAddress } from "../bot/botWallet";
 import { FundBotPanel } from "../components/FundBotPanel";
-import { Phase, PHASE_LABELS } from "../utils/phase";
+import { Phase, PHASE_LABELS, isTerminal } from "../utils/phase";
 import { tableIdFromCreateTx, rememberStakes } from "../utils/createTable";
+import { loadHidden, hideTable, unhideAll } from "../utils/hiddenTables";
+import { WalletPendingBanner } from "../components/WalletPendingBanner";
 
 type Mode = "bot" | "manual";
 type TableTuple = [
@@ -67,6 +69,7 @@ export default function Lobby() {
 
   return (
     <div className="max-w-5xl mx-auto px-6 py-8 space-y-8">
+      <WalletPendingBanner pending={actions.isPending} />
       <section className="space-y-3">
         <h1 className="text-2xl font-bold tracking-widest">LOBBY</h1>
         <p className="text-sm text-ink/80 max-w-2xl">
@@ -152,7 +155,6 @@ export default function Lobby() {
       )}
 
       <section className="space-y-3">
-        <div className="text-xs uppercase tracking-widest text-ink/60">Tables</div>
         <TableList
           count={nextId ? Number(nextId as bigint) : 0}
           actions={actions}
@@ -172,13 +174,63 @@ function TableList({
   actions: ReturnType<typeof useGameActions>;
   hostAddress?: Address;
 }) {
-  if (count === 0) return <div className="text-ink/40">No tables yet.</div>;
+  const [hidden, setHidden] = useState<Set<string>>(() => loadHidden(hostAddress));
+  useEffect(() => {
+    setHidden(loadHidden(hostAddress));
+  }, [hostAddress]);
+
+  const onHide = (id: bigint) => {
+    setHidden(hideTable(hostAddress, id));
+  };
+  const onUnhideAll = () => {
+    setHidden(unhideAll(hostAddress));
+  };
+
+  const visibleCount = count - hidden.size;
+  if (count === 0) {
+    return (
+      <>
+        <div className="text-xs uppercase tracking-widest text-ink/60">Tables</div>
+        <div className="text-ink/40">No tables yet.</div>
+      </>
+    );
+  }
+
   return (
-    <div className="space-y-2">
-      {Array.from({ length: count }, (_, i) => (
-        <TableRow key={i} id={BigInt(i)} actions={actions} hostAddress={hostAddress} />
-      ))}
-    </div>
+    <>
+      <div className="flex items-center justify-between">
+        <div className="text-xs uppercase tracking-widest text-ink/60">Tables</div>
+        {hidden.size > 0 && (
+          <button
+            onClick={onUnhideAll}
+            className="text-[10px] uppercase tracking-widest text-ink/50 hover:text-gold"
+          >
+            show {hidden.size} hidden
+          </button>
+        )}
+      </div>
+      {visibleCount === 0 ? (
+        <div className="text-ink/40 text-sm">
+          All tables hidden. Click "show {hidden.size} hidden" above to restore.
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {Array.from({ length: count }, (_, i) => {
+            const idStr = i.toString();
+            if (hidden.has(idStr)) return null;
+            return (
+              <TableRow
+                key={i}
+                id={BigInt(i)}
+                actions={actions}
+                hostAddress={hostAddress}
+                onHide={onHide}
+              />
+            );
+          })}
+        </div>
+      )}
+    </>
   );
 }
 
@@ -186,10 +238,12 @@ function TableRow({
   id,
   actions,
   hostAddress,
+  onHide,
 }: {
   id: bigint;
   actions: ReturnType<typeof useGameActions>;
   hostAddress?: Address;
+  onHide: (id: bigint) => void;
 }) {
   const { data } = useReadContract({
     address: POKER_TABLE_ADDRESS,
@@ -214,15 +268,21 @@ function TableRow({
   // joinTable on a table where you're already P1: contract reverts.
   const canJoin = phaseNum === Phase.WAITING && !isOwnTable;
   const linkSuffix = isOwnTable ? "?bot=1" : "";
+  const isDead = isTerminal(phaseNum);
 
   return (
     <div className="border border-edge rounded p-3 flex items-center justify-between text-sm">
       <div>
-        <div>
-          Table #{id.toString()}
+        <div className="flex items-center gap-2">
+          <span>Table #{id.toString()}</span>
           {isOwnTable && (
-            <span className="ml-2 text-[10px] uppercase tracking-widest text-gold/70">
+            <span className="text-[10px] uppercase tracking-widest text-gold/70">
               your seat
+            </span>
+          )}
+          {isDead && (
+            <span className="text-[10px] uppercase tracking-widest text-ink/40">
+              settled
             </span>
           )}
         </div>
@@ -253,6 +313,13 @@ function TableRow({
         >
           Spectate
         </Link>
+        <button
+          onClick={() => onHide(id)}
+          title="Hide from this list (local only; table still exists on-chain)"
+          className="px-3 py-1 border border-edge text-ink/40 uppercase text-xs tracking-widest hover:border-red-500/60 hover:text-red-300"
+        >
+          hide
+        </button>
       </div>
     </div>
   );
