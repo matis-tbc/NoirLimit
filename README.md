@@ -178,7 +178,7 @@ cd frontend && npm install && npm run build
 - **Bot wallet key lives in browser localStorage.** Sweep it back to your
   host wallet before clearing storage.
 - **2-player heads-up only.** N-party threshold decryption is out of scope.
-- **No external audit.** 65+ contract tests are the only correctness gate.
+- **No external audit.** 90 contract tests are the only correctness gate.
 - **Verifier contracts are gas-heavy** and may exceed EIP-170 size limits at
   L1; L2 deployment untested. When `demoMode` flips to false, the per-tx
   gas overrides in `frontend/src/utils/gas.ts` need to be bumped to cover

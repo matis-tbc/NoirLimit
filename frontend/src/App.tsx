@@ -54,7 +54,7 @@ export default function App() {
         <span className="text-ink/30">|</span>
         <span>Sepolia chainId 11155111</span>
         <span className="text-ink/30">|</span>
-        <span>65 contract tests passing</span>
+        <span>90 contract tests passing</span>
         <span className="text-ink/30">|</span>
         <span>shuffle circuit: 103,756 gates</span>
         <span className="text-ink/30">|</span>
