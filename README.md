@@ -31,11 +31,14 @@ See [SECURITY.md](./SECURITY.md) for what this does and does not prove.
 | Layer | State |
 |---|---|
 | Noir circuits (shuffle, decrypt, reveal) | Built, 17 tests passing |
-| Solidity contracts (PokerTable, SpectatorMarket, HandEvaluator) | Built, 90 tests passing |
+| Solidity contracts (PokerTable, SpectatorMarket, HandEvaluator, RevealVerifier) | Built, 93 tests passing |
 | Sepolia deployment of PokerTable | Live in demoMode |
 | Sepolia deployment of SpectatorMarket | Live + verified (source-only reentrancy guard pending redeploy) |
+| Sepolia deployment of standalone RevealVerifier (UltraPlonk) | Live, accepts real Noir proofs, rejects tampered inputs |
+| In-browser proof demo (`/proof-demo`) | Built (bb.js generates a real reveal proof in the browser, calls live verifier) |
+| Demo-day e2e verification (`just verify-e2e`) | Built (bb.js self-verify + Foundry + live Sepolia agree) |
 | Frontend (Vite + React + wagmi + RainbowKit) | Built, runs locally |
-| In-browser bot opponent | Built (ephemeral wallet, auto-plays, retries on revert) |
+| In-browser bot opponent | Built (ephemeral wallet, pokersolver-driven decisions, retries on revert) |
 | Spectator wagering UI | Built with odds bar, time-series sparkline, sealed-state badge, live ticker |
 | ZK reveal animation | Built (three-beat tied to tx lifecycle, dismissable) |
 | Cheat moment | Built (`<CheatMoment>` dedicated component, confirm + caught modals, demoMode-truthful copy) |
@@ -51,6 +54,7 @@ See [SECURITY.md](./SECURITY.md) for what this does and does not prove.
 - `PokerTable.sol` &mdash; [`0x6Ccaf05ac50eABE2c90b8187b9B6734dCB0E88eC`](https://sepolia.etherscan.io/address/0x6Ccaf05ac50eABE2c90b8187b9B6734dCB0E88eC)
 - `SpectatorMarket.sol` &mdash; [`0x666898f7706ddd0193012aEc50EAF7D2E9FCbAf0`](https://sepolia.etherscan.io/address/0x666898f7706ddd0193012aEc50EAF7D2E9FCbAf0)
 - `MockVerifier.sol` &mdash; [`0xAc89d6BF5cA8e8f672bA2D3994f3AE8Ae7083e40`](https://sepolia.etherscan.io/address/0xAc89d6BF5cA8e8f672bA2D3994f3AE8Ae7083e40)
+- `RevealVerifier.sol` (standalone UltraPlonk, for `/proof-demo`) &mdash; [`0x8A6e6fb6e795a22d6eD4cB3922bDE5164B03BB51`](https://sepolia.etherscan.io/address/0x8A6e6fb6e795a22d6eD4cB3922bDE5164B03BB51)
 
 ## Run locally
 
@@ -83,9 +87,29 @@ wallet is dry. See [`frontend/README.md`](./frontend/README.md) for more.
 For a deeper look at the protocol, see
 [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md) (three-layer diagram with
 the demoMode asterisks called out) and
-[`docs/WALKTHROUGH.md`](./docs/WALKTHROUGH.md) (guided tour of four
+[`docs/WALKTHROUGH.md`](./docs/WALKTHROUGH.md) (guided tour of five
 hotspots: the shuffle circuit, the state machine guard, the reveal
-invariant, and the demoMode dealing short-circuit).
+invariant, the demoMode dealing short-circuit, and the `/proof-demo`
+in-browser proving pipeline).
+
+### `/proof-demo`: real ZK, no demoMode
+
+The main table runs in `demoMode = true`. To show that the Noir toolchain
+actually produces sound proofs against a real on-chain verifier, visit
+`http://localhost:51852/proof-demo`. The page:
+
+1. Loads the `reveal` circuit artifact into `@noir-lang/noir_js`.
+2. Generates a real UltraPlonk proof in the browser via `@aztec/bb.js`.
+3. Self-verifies it.
+4. Calls `verify(bytes, bytes32[])` on the live Sepolia `RevealVerifier`.
+5. Lets you flip one public input ("tamper") and watch the verifier revert
+   with the pairing-check selector `0xd71fd263`.
+
+Same pipeline reproducible from the shell:
+
+```bash
+just verify-e2e     # bb.js prove + self-verify, Foundry suite, live Sepolia honest vs. tampered
+```
 
 **Important: act within 120 seconds when it's your turn.** The contract
 enforces a per-phase deadline. Past 120s, every action reverts with
@@ -130,16 +154,19 @@ NoirLimit/
 │   │   ├── SpectatorMarket.sol  # Pari-mutuel wagers on hand outcome
 │   │   ├── HandEvaluator.sol    # Best 5-of-7 hand ranking
 │   │   └── interfaces/, mocks/
-│   ├── test/                # Foundry test suite
-│   ├── script/              # Deploy scripts
+│   ├── test/                # Foundry test suite (incl. RevealVerifier.t.sol)
+│   ├── script/              # Deploy scripts (incl. DeployRevealVerifier.s.sol)
 │   └── deployments/         # Per-chain address registry
+├── prover/                  # bb.js reveal-proof fixture generator (Node)
+├── scripts/verify-e2e.sh    # Three-stage demo-day ZK pipeline check
+├── justfile                 # just verify-e2e, just test-reveal, etc.
 ├── frontend/                # Vite + React + wagmi + RainbowKit
 │   ├── src/
-│   │   ├── pages/           # Lobby, Table, Spectator
-│   │   ├── components/      # Card, Seat, ActionBar, ZKReveal, OddsBar, etc.
+│   │   ├── pages/           # Lobby, Table, Spectator, ProofDemo
+│   │   ├── components/      # Card, Seat, ActionBar, ZKReveal, OddsBar, CheatMoment, etc.
 │   │   ├── hooks/           # usePokerTable, useGameActions, useAutoSubmit, useDemoBot
-│   │   ├── bot/             # Ephemeral-key auto-opponent
-│   │   └── utils/           # zkLog (tx hash store), demoPayloads, deal
+│   │   ├── bot/             # Ephemeral-key auto-opponent + pokersolver brain
+│   │   └── utils/           # zkLog, demoPayloads, deal, gas, contracts
 │   └── README.md            # Frontend run + architecture details
 ├── docs/archive/            # Original planning + protocol design docs
 └── SECURITY.md              # Demo posture + threat model
@@ -178,7 +205,9 @@ cd frontend && npm install && npm run build
 - **Bot wallet key lives in browser localStorage.** Sweep it back to your
   host wallet before clearing storage.
 - **2-player heads-up only.** N-party threshold decryption is out of scope.
-- **No external audit.** 90 contract tests are the only correctness gate.
+- **No external audit yet.** Correctness is gated by 93 Foundry tests, 17
+  Noir tests, and a standalone Sepolia verifier that accepts real reveal
+  proofs and rejects tampered ones (see `/proof-demo`).
 - **Verifier contracts are gas-heavy** and may exceed EIP-170 size limits at
   L1; L2 deployment untested. When `demoMode` flips to false, the per-tx
   gas overrides in `frontend/src/utils/gas.ts` need to be bumped to cover

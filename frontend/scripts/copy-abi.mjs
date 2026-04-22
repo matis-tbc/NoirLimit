@@ -12,6 +12,7 @@ mkdirSync(abiDir, { recursive: true });
 const sources = [
   ["PokerTable.sol/PokerTable.json", "PokerTable.json"],
   ["SpectatorMarket.sol/SpectatorMarket.json", "SpectatorMarket.json"],
+  ["RevealVerifier.sol/UltraVerifier.json", "RevealVerifier.json"],
 ];
 
 for (const [src, dst] of sources) {

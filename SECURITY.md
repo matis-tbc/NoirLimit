@@ -10,7 +10,7 @@ have a `nargo test` suite with positive and negative cases. 17 tests total.
 A valid shuffle proof verifies; a tampered rerandomization fails; a bogus
 reveal fails.
 
-**Solidity contracts.** 90 Foundry tests cover every phase transition, every
+**Solidity contracts.** 93 Foundry tests cover every phase transition, every
 timeout branch, min-raise and all-in cases, split pots, the hand evaluator's
 5-of-7 ranking (including wheel-straight and broadway), and the
 SpectatorMarket pari-mutuel math. A reentrancy attacker contract is tested
@@ -24,6 +24,18 @@ by side in `circuits/*/src/main.nr` and `contracts/src/PokerTable.sol`.
 **Cheat path.** The `<CheatMoment>` component submits an intentionally-invalid
 `revealHand` and the contract rejects it on-chain. Available during the
 SHOWDOWN phase.
+
+**Standalone ZK pipeline.** A real UltraPlonk `RevealVerifier` generated
+from `circuits/reveal` is deployed on Sepolia at
+`0x8A6e6fb6e795a22d6eD4cB3922bDE5164B03BB51`. The `/proof-demo` route
+generates a real proof in the browser via `@aztec/bb.js`, self-verifies,
+and calls `verify(bytes, bytes32[])` on that contract. Tampering with a
+public input makes the verifier revert at the pairing check. The same
+three boundaries are reproducible from the shell via `just verify-e2e`:
+bb.js self-verify, Foundry test against the generated verifier, and a
+live Sepolia call for both honest and tampered inputs. This demonstrates
+the Noir-to-EVM toolchain produces sound proofs independently of whether
+the main table is choosing to check them in `demoMode`.
 
 ## Demo-mode tradeoff
 
@@ -84,8 +96,8 @@ decryption protocol is part of the `demoMode = false` deploy.
   phase advance that closes the wagering window has no targeted test.
   The state check in `placeWager` handles it; an explicit test would
   make the invariant visible.
-- **No external audit.** 90 Foundry tests + 17 Noir tests are the
-  correctness gate.
+- **No external audit yet.** Correctness is gated by 93 Foundry tests,
+  17 Noir tests, and the live standalone RevealVerifier on Sepolia.
 
 ## Bot wallet key storage
 

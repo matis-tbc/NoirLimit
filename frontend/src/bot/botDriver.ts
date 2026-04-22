@@ -16,6 +16,7 @@ import {
 } from "../utils/demoPayloads";
 import { dealHoleCards } from "../utils/deal";
 import type { BotClients } from "./botWallet";
+import { decideAction } from "./brain";
 
 interface TickArgs {
   bot: BotClients;
@@ -285,8 +286,9 @@ export async function botTick({
     return { acted: true, phase };
   }
 
-  // Betting phases: only if it's the bot's turn. Prefer CALL; fall back to
-  // CHECK when there's nothing to call.
+  // Betting phases: only if it's the bot's turn. Use hand strength to pick
+  // CHECK / CALL / RAISE / FOLD; fall back to the safest legal action if the
+  // contract rejects (e.g. CALL when no outstanding bet, RAISE under min).
   if (
     (phase === Phase.PREFLOP ||
       phase === Phase.FLOP_BET ||
@@ -295,10 +297,45 @@ export async function botTick({
     t.turn === seat
   ) {
     lastSubmitted.current = key;
+    const dealt = dealHoleCards(tableId, t.players[0], t.players[1]);
+    const hole = seat === 0 ? dealt.p1 : dealt.p2;
+    const bbWei = t.pot > 0n ? t.pot / 10n || 1n : 1n;
+    const decision = decideAction(hole, {
+      phase,
+      potWei: t.pot,
+      botStackWei: t.stacks[seat],
+      bigBlindWei: bbWei,
+      randomSeed: Number(tableId % 10_000n),
+    });
+
+    const attempt = async (code: ActionCode, amount: bigint) => {
+      await send(bot, "act", [tableId, code, amount], ctx);
+    };
+
     try {
-      await send(bot, "act", [tableId, ActionCode.CALL, 0n], ctx);
+      if (decision.code === ActionCode.RAISE) {
+        await attempt(ActionCode.RAISE, decision.amount);
+      } else if (decision.code === ActionCode.FOLD) {
+        await attempt(ActionCode.FOLD, 0n);
+      } else if (decision.code === ActionCode.CALL) {
+        await attempt(ActionCode.CALL, 0n);
+      } else {
+        await attempt(ActionCode.CHECK, 0n);
+      }
     } catch {
-      await send(bot, "act", [tableId, ActionCode.CHECK, 0n], ctx);
+      // Safest legal fallback order: CALL -> CHECK -> FOLD. Covers "nothing
+      // to call" (CHECK), "cannot check, bet outstanding" (CALL), and the
+      // rare case where RAISE is under the min (CALL/CHECK) without wedging
+      // the demo.
+      try {
+        await attempt(ActionCode.CALL, 0n);
+      } catch {
+        try {
+          await attempt(ActionCode.CHECK, 0n);
+        } catch {
+          await attempt(ActionCode.FOLD, 0n);
+        }
+      }
     }
     return { acted: true, phase };
   }

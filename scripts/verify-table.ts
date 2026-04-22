@@ -22,6 +22,8 @@ import {
   type Address,
 } from "viem";
 import { sepolia } from "viem/chains";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 const POKER = "0x6Ccaf05ac50eABE2c90b8187b9B6734dCB0E88eC" as Address;
 const SPECTATOR = "0x666898f7706ddd0193012aEc50EAF7D2E9FCbAf0" as Address;
@@ -54,11 +56,31 @@ if (tableId === null) {
 }
 const rpcIdx = args.indexOf("--rpc");
 const botIdx = args.indexOf("--bot");
+
+function readEnvLocalRpc(): string | undefined {
+  try {
+    const file = resolve(process.cwd(), "frontend/.env.local");
+    const text = readFileSync(file, "utf8");
+    const line = text.split(/\r?\n/).find((l) => l.startsWith("VITE_SEPOLIA_RPC="));
+    if (!line) return undefined;
+    return line.slice("VITE_SEPOLIA_RPC=".length).replace(/^['"]|['"]$/g, "").trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const rpc =
   rpcIdx !== -1
     ? args[rpcIdx + 1]
-    : process.env.SEPOLIA_RPC ||
-      "https://eth-sepolia.g.alchemy.com/v2/E5ZvK--5WhZGCR8Uelq6G";
+    : process.env.SEPOLIA_RPC || process.env.SEPOLIA_RPC_URL || readEnvLocalRpc();
+
+if (!rpc) {
+  console.error(
+    "ERROR: no Sepolia RPC configured. Pass --rpc <url>, set SEPOLIA_RPC / SEPOLIA_RPC_URL, or add VITE_SEPOLIA_RPC to frontend/.env.local."
+  );
+  process.exit(1);
+}
+
 const botAddress = botIdx !== -1 ? (args[botIdx + 1] as Address) : undefined;
 
 const client = createPublicClient({ chain: sepolia, transport: http(rpc) });

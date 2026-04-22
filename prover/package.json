@@ -1,0 +1,14 @@
+{
+  "name": "noirlimit-prover",
+  "version": "0.1.0",
+  "description": "CLI prover for NoirLimit reveal circuit. Used by spike + Foundry fixtures.",
+  "type": "module",
+  "main": "prove-reveal.mjs",
+  "scripts": {
+    "prove:reveal": "node prove-reveal.mjs"
+  },
+  "dependencies": {
+    "@aztec/bb.js": "0.63.1",
+    "@noir-lang/noir_js": "0.39.0"
+  }
+}

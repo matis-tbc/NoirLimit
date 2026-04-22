@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useWriteContract, usePublicClient } from "wagmi";
 import type { Hex } from "viem";
 import { POKER_TABLE_ABI, POKER_TABLE_ADDRESS } from "../utils/contracts";
@@ -25,9 +26,25 @@ type State =
   | { kind: "confirming" }
   | { kind: "trying" }
   | { kind: "caught"; reason: string; hash?: Hex }
+  | { kind: "cancelled" }
+  | { kind: "revealFailed"; reason: string }
   | { kind: "snuck"; hash: Hex }
   | { kind: "revealing" }
   | { kind: "revealed" };
+
+// Heuristic for "user rejected wallet popup" across wallet providers. Keeps
+// us from mislabeling a cancel as the chain catching a cheat.
+function isUserRejection(err: unknown): boolean {
+  const e = err as { code?: number; message?: string; shortMessage?: string } | undefined;
+  if (!e) return false;
+  if (e.code === 4001) return true;
+  const hay = `${e.shortMessage ?? ""} ${e.message ?? ""}`.toLowerCase();
+  return (
+    hay.includes("user rejected") ||
+    hay.includes("user denied") ||
+    hay.includes("rejected the request")
+  );
+}
 
 // The one moment in the demo where a ZK-enforced invariant is visible. Submits
 // a deliberately-invalid revealHand that duplicates community-card indices;
@@ -66,6 +83,10 @@ export function CheatMoment({ tableId, phase, realCards, onAttempt, onRealReveal
         setState({ kind: "snuck", hash });
       }
     } catch (err) {
+      if (isUserRejection(err)) {
+        setState({ kind: "cancelled" });
+        return;
+      }
       const { reason } = parseRevert(err);
       setState({ kind: "caught", reason });
     }
@@ -96,8 +117,13 @@ export function CheatMoment({ tableId, phase, realCards, onAttempt, onRealReveal
           This is the only moment in this UI where a cheating attempt is
           visibly caught. In demoMode the MockVerifier accepts any proof
           bytes, so what rejects this is a Solidity <code>require</code> in{" "}
-          <code>revealHand</code>. With a real verifier on, the Noir{" "}
-          <code>reveal</code> circuit would catch it one layer earlier.
+          <code>revealHand</code>. The real Noir reveal circuit is deployed
+          as a standalone verifier on Sepolia and catches the same tamper at
+          the cryptographic layer,{" "}
+          <Link to="/proof-demo" className="underline hover:text-gold">
+            see /proof-demo
+          </Link>
+          .
           {!showdownReady && (
             <span className="text-ink/40"> (wait for showdown)</span>
           )}
@@ -124,10 +150,19 @@ export function CheatMoment({ tableId, phase, realCards, onAttempt, onRealReveal
             try {
               await onRealReveal(realCards);
               setState({ kind: "revealed" });
-            } catch {
-              // Parent already surfaced the error via useGameActions.lastError.
-              // Drop back to the caught modal so the user can retry.
-              setState({ kind: "caught", reason: "real reveal failed, retry" });
+            } catch (err) {
+              if (isUserRejection(err)) {
+                // User hit Reject on the honest reveal prompt. Drop back to
+                // the caught modal so they can retry rather than showing a
+                // scary error modal.
+                setState({
+                  kind: "caught",
+                  reason: "honest reveal cancelled in wallet, retry",
+                });
+                return;
+              }
+              const { reason } = parseRevert(err);
+              setState({ kind: "revealFailed", reason });
             }
           }}
         />
@@ -143,6 +178,33 @@ export function CheatMoment({ tableId, phase, realCards, onAttempt, onRealReveal
 
       {state.kind === "snuck" && (
         <SnuckModal hash={state.hash} onClose={() => setState({ kind: "idle" })} />
+      )}
+
+      {state.kind === "cancelled" && (
+        <CancelledModal onClose={() => setState({ kind: "idle" })} />
+      )}
+
+      {state.kind === "revealFailed" && (
+        <RevealFailedModal
+          reason={state.reason}
+          canRetry={realCards !== null}
+          onClose={() => setState({ kind: "idle" })}
+          onRetry={async () => {
+            if (!realCards) return;
+            setState({ kind: "revealing" });
+            try {
+              await onRealReveal(realCards);
+              setState({ kind: "revealed" });
+            } catch (err) {
+              if (isUserRejection(err)) {
+                setState({ kind: "idle" });
+                return;
+              }
+              const { reason } = parseRevert(err);
+              setState({ kind: "revealFailed", reason });
+            }
+          }}
+        />
       )}
     </>
   );
@@ -203,8 +265,12 @@ function CaughtModal({
         <p className="text-sm text-ink/80 leading-snug">
           The chain refused the bogus reveal. The revert reason below is what
           the on-chain invariant returned. In demoMode this is a Solidity
-          check; with a real verifier deployed, the Noir circuit would catch
-          it one layer earlier.
+          check; the real Noir reveal circuit catches the same tamper at the
+          SNARK layer,{" "}
+          <Link to="/proof-demo" className="underline hover:text-gold">
+            try it on /proof-demo
+          </Link>
+          .
         </p>
         <div className="border border-edge bg-black/40 p-3 space-y-2">
           <div className="text-[10px] uppercase tracking-widest text-ink/50">
@@ -281,6 +347,78 @@ function RevealedModal({ onClose }: { onClose: () => void }) {
           >
             Close
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CancelledModal({ onClose }: { onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur flex items-center justify-center">
+      <div className="max-w-sm w-[90%] border border-edge bg-bg p-6 space-y-3">
+        <div className="text-xs uppercase tracking-[0.3em] text-ink/70">
+          Cancelled in wallet
+        </div>
+        <p className="text-sm text-ink/70 leading-snug">
+          No tx was sent. Nothing happened on-chain, and your seat is still
+          intact. Hit "Try to cheat" again whenever you're ready.
+        </p>
+        <div className="flex justify-end">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 border border-edge text-xs uppercase tracking-widest hover:border-gold/60"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RevealFailedModal({
+  reason,
+  canRetry,
+  onClose,
+  onRetry,
+}: {
+  reason: string;
+  canRetry: boolean;
+  onClose: () => void;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur flex items-center justify-center">
+      <div className="max-w-md w-[90%] border border-red-500/60 bg-bg p-6 space-y-4">
+        <div className="text-xs uppercase tracking-[0.3em] text-red-400">
+          Honest reveal failed
+        </div>
+        <p className="text-sm text-ink/80 leading-snug">
+          The real reveal didn't land. Revert reason below. This can happen if
+          the phase already advanced past showdown while the wallet prompt was
+          open.
+        </p>
+        <div className="border border-edge bg-black/40 p-3">
+          <div className="font-mono text-sm text-red-300 break-words">
+            {reason}
+          </div>
+        </div>
+        <div className="flex justify-end gap-2">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 border border-edge text-xs uppercase tracking-widest hover:border-gold/60"
+          >
+            Close
+          </button>
+          {canRetry && (
+            <button
+              onClick={onRetry}
+              className="px-4 py-2 border border-green-500 text-green-300 text-xs uppercase tracking-widest hover:bg-green-900/30"
+            >
+              Retry honest reveal
+            </button>
+          )}
         </div>
       </div>
     </div>
